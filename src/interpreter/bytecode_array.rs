@@ -806,6 +806,12 @@ impl BytecodeArrayBuilder {
         self.emit_u8(0);
     }
 
+    pub fn shift_right_logical(&mut self, reg: Register) {
+        self.emit_bytecode(Bytecode::ShiftRightLogical);
+        self.emit_i8(reg.to_operand() as i8);
+        self.emit_u8(0);
+    }
+
     // Binary operations with Smi immediate: accumulator = accumulator OP imm
     pub fn add_smi(&mut self, imm: i32) {
         self.emit_bytecode(Bytecode::AddSmi);

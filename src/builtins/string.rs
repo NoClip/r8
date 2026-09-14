@@ -245,6 +245,34 @@ pub fn create_string_prototype() -> Rc<RefCell<JSObject>> {
     );
 
 
+    // String.prototype.charCodeAt(index)
+    JSObject::set_property(
+        &proto,
+        "charCodeAt",
+        JSValue::Function(JSFunction::new_native("charCodeAt", |this, args| {
+            let s = this.to_string_val();
+            let idx = args.get(0).map(|v| v.to_number()).unwrap_or(0.0);
+            if idx.is_nan() || idx < 0.0 {
+                return Ok(JSValue::Number(f64::NAN));
+            }
+            let index = idx as usize;
+            if s.is_ascii() {
+                let bytes = s.as_bytes();
+                if index < bytes.len() {
+                    return Ok(JSValue::Smi(bytes[index] as i32));
+                } else {
+                    return Ok(JSValue::Number(f64::NAN));
+                }
+            }
+            let chars: Vec<char> = s.chars().collect();
+            if index < chars.len() {
+                return Ok(JSValue::Smi(chars[index] as u32 as i32));
+            } else {
+                return Ok(JSValue::Number(f64::NAN));
+            }
+        })),
+    );
+
     // String.prototype.indexOf(searchValue, fromIndex)
     JSObject::set_property(
         &proto,

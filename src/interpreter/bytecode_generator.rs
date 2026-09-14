@@ -1974,6 +1974,7 @@ impl BytecodeGenerator {
                 self.builder.test_greater_than_or_equal(rhs_reg);
             }
             BinaryOperator::LogicalAnd => self.builder.test_equal(rhs_reg),
+            BinaryOperator::ShiftRightLogical => self.builder.shift_right_logical(rhs_reg),
             BinaryOperator::InstanceOf => self.builder.test_instance_of(rhs_reg),
             BinaryOperator::In => self.builder.test_in(rhs_reg),
             _ => self.builder.add(rhs_reg),
