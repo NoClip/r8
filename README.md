@@ -24,13 +24,13 @@ This entire engine was designed, ported, architected, compiled, debugged, and op
 ## 2. Empirical Performance Benchmark Comparison (Rust V8 vs. Google V8)
 
 To rigorously verify execution speed and algorithmic correctness, the multi-workload benchmark suite ([`benchmark.js`](benchmark.js)) was benchmarked across three configurations:
-1. **Rust V8 (100% Pure Safe Rust)**: Compiled with `lto = "fat"`, `opt-level = 3`, `codegen-units = 1`.
+1. **R8 (Rust V8)**: Compiled with `lto = "fat"`, `opt-level = 3`, `codegen-units = 1`.
 2. **Google V8 (Full JIT / TurboFan)**: Official Google V8 (via Node.js v24.9.0, V8 13.6.233.10 with TurboFan native machine code compilation).
 3. **Google V8 (Jitless Interpreter)**: Official Google V8 running in pure interpreted mode (`--jitless`).
 
 ### Benchmark Results Table (Average of 3 Runs)
 
-| # | Workload Benchmark | Rust V8 (Pure Safe Rust) | Google V8 (Jitless) | Google V8 (Full JIT TurboFan) | Output Checksum Match | Performance vs TurboFan |
+| # | Workload Benchmark | R8 (Rust V8) | Google V8 (Jitless) | Google V8 (Full JIT TurboFan) | Output Checksum Match | Performance vs TurboFan |
 | :-: | :--- | :-: | :-: | :-: | :-: | :-: |
 | **1** | **Arithmetic & Loop Throughput** (500k ops) | **2.3 ms** | 14.0 ms | 4.0 ms | `99482507` (100% Match ✓) | **1.74x Faster ⚡** |
 | **2** | **Recursive Fibonacci** (`fib(26)`) | **1.0 ms** | 16.7 ms | 2.0 ms | `121393` (100% Match ✓) | **2.00x Faster ⚡** |
@@ -42,9 +42,9 @@ To rigorously verify execution speed and algorithmic correctness, the multi-work
 
 ```
 TOTAL BENCHMARK EXECUTION TIME (Lower is Better):
-  Rust V8 (Pure Safe Rust)  [■■■■                        ]  8.0 ms (FASTEST)
-  Google V8 (Full JIT)      [■■■■■■                      ] 11.0 ms
-  Google V8 (Jitless)       [■■■■■■■■■■■■■■■■■■■         ] 38.0 ms
+  R8 (Rust V8)          [■■■■                        ]  8.0 ms (FASTEST)
+  Google V8 (Full JIT)  [■■■■■■                      ] 11.0 ms
+  Google V8 (Jitless)   [■■■■■■■■■■■■■■■■■■■         ] 38.0 ms
 ```
 
 ### Core Performance Strategies Implemented
@@ -95,7 +95,7 @@ strip = "symbols"
 ## 4. Complete 44-Phase Architectural Roadmap (100% Implemented)
 
 ```
-                                GOOGLE V8 PURE SAFE RUST ARCHITECTURE
+                                R8 (Rust V8) ARCHITECTURE
  ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
  │                                                                                                        │
  │  1. FRONTEND: LEXER, SCANNER & PRATT PARSER (src/parsing/, src/ast/)                                   │
@@ -224,7 +224,7 @@ cargo build --release --bin d8
 target\release\d8.exe
 ```
 ```text
-V8 version 12.4.254.20-rust (100% Pure Safe Rust)
+V8 version 12.4.254.20-rust (100% )
 Type 'exit' or press Ctrl+C to quit.
 
 d8> let arr = [10, 20, 30, 40, 50];
