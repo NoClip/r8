@@ -10,9 +10,9 @@ RUNS = 3
 
 TARGETS = [
     {
-        "name": "Rust V8 (Pure Safe Rust)",
+        "name": "R8 (Rust V8)",
         "cmd": ["target\\release\\d8.exe", SCRIPT],
-        "category": "Rust V8"
+        "category": "R8 (Rust V8)"
     },
     {
         "name": "Google V8 (JIT-less Interpreter)",

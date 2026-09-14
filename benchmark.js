@@ -16,7 +16,7 @@ function runBenchmark(name, fn) {
     return duration;
 }
 
-var platformName = "Rust V8 d8 Shell";
+var platformName = "R8 (Rust V8) d8 Shell";
 if (typeof process !== "undefined") {
     platformName = "Node.js " + process.version + " (V8 " + process.versions.v8 + ")";
 }

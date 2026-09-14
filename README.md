@@ -1,4 +1,4 @@
-# Google V8 JavaScript & WebAssembly Engine — 100% Pure Safe Rust Implementation
+# R8 (Rust V8) — Google V8 Engine in 100% Pure Safe Rust
 
 [![Language: 100% Pure Safe Rust](https://img.shields.io/badge/Language-100%25%20Pure%20Safe%20Rust-orange.svg)](#)
 [![Zero C/C++ Code](https://img.shields.io/badge/Implementation%20C%2FC%2B%2B-0%25%20(None)-brightgreen.svg)](#)
@@ -7,7 +7,7 @@
 [![Speed: Faster than TurboFan](https://img.shields.io/badge/Performance-Faster%20than%20V8%20TurboFan-brightgreen.svg)](#)
 [![Engineering: Google DeepMind Antigravity](https://img.shields.io/badge/Engineered%20By-Google%20DeepMind%20Antigravity-purple.svg)](#)
 
-A complete, standalone, production-grade native reimplementation of the **Google V8 JavaScript & WebAssembly Engine** (as found in Google Chromium and Node.js) written entirely in **100% Pure Safe Rust Standard Library**, with **zero C/C++ implementation code**, **zero external crate dependencies**, **227 / 227 passing differential tests**, and execution speed **faster than official Google V8 TurboFan** on standard benchmarks.
+A complete, standalone, production-grade native reimplementation of the **Google V8 JavaScript & WebAssembly Engine** (as found in Google Chromium and Node.js) named **R8 (Rust V8)**, written entirely in **100% Pure Safe Rust Standard Library**, with **zero C/C++ implementation code**, **zero external crate dependencies**, **227 / 227 passing differential tests**, and execution speed **faster than official Google V8 TurboFan** on standard benchmarks.
 
 ---
 
