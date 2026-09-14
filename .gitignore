@@ -1,0 +1,19 @@
+# Rust build output
+target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE & AI Assistant internal metadata
+.agents/
+.vscode/
+.idea/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+dummy.cpp

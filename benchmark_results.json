@@ -1,0 +1,152 @@
+[
+  {
+    "name": "Rust V8 (Pure Safe Rust)",
+    "category": "Rust V8",
+    "benchmarks": {
+      "1. Loop & Arithmetic Throughput (500k ops)": {
+        "avg_ms": 2.3,
+        "min_ms": 2,
+        "max_ms": 3,
+        "std_ms": 0.6,
+        "result": "99482507"
+      },
+      "2. Recursive Fibonacci fib(26)": {
+        "avg_ms": 1,
+        "min_ms": 1,
+        "max_ms": 1,
+        "std_ms": 0.0,
+        "result": "121393"
+      },
+      "3. Object Creation & IC Access (20k objs)": {
+        "avg_ms": 1.7,
+        "min_ms": 1,
+        "max_ms": 2,
+        "std_ms": 0.6,
+        "result": "99969965"
+      },
+      "4. TypedArray Int32Array (20k elements)": {
+        "avg_ms": 1,
+        "min_ms": 1,
+        "max_ms": 1,
+        "std_ms": 0.0,
+        "result": "19265126"
+      },
+      "5. Array Push & Iteration (20k elements)": {
+        "avg_ms": 1,
+        "min_ms": 1,
+        "max_ms": 1,
+        "std_ms": 0.0,
+        "result": "99989993"
+      },
+      "6. String Concatenation & Slicing (10k ops)": {
+        "avg_ms": 1,
+        "min_ms": 1,
+        "max_ms": 1,
+        "std_ms": 0.0,
+        "result": "2500"
+      }
+    },
+    "total_avg_ms": 8,
+    "total_min_ms": 7
+  },
+  {
+    "name": "Google V8 (JIT-less Interpreter)",
+    "category": "Upstream V8",
+    "benchmarks": {
+      "1. Loop & Arithmetic Throughput (500k ops)": {
+        "avg_ms": 14,
+        "min_ms": 13,
+        "max_ms": 15,
+        "std_ms": 1.0,
+        "result": "99482507"
+      },
+      "2. Recursive Fibonacci fib(26)": {
+        "avg_ms": 16.7,
+        "min_ms": 16,
+        "max_ms": 17,
+        "std_ms": 0.6,
+        "result": "121393"
+      },
+      "3. Object Creation & IC Access (20k objs)": {
+        "avg_ms": 2.3,
+        "min_ms": 2,
+        "max_ms": 3,
+        "std_ms": 0.6,
+        "result": "99969965"
+      },
+      "4. TypedArray Int32Array (20k elements)": {
+        "avg_ms": 2,
+        "min_ms": 2,
+        "max_ms": 2,
+        "std_ms": 0.0,
+        "result": "19265126"
+      },
+      "5. Array Push & Iteration (20k elements)": {
+        "avg_ms": 2,
+        "min_ms": 2,
+        "max_ms": 2,
+        "std_ms": 0.0,
+        "result": "99989993"
+      },
+      "6. String Concatenation & Slicing (10k ops)": {
+        "avg_ms": 1,
+        "min_ms": 1,
+        "max_ms": 1,
+        "std_ms": 0.0,
+        "result": "2500"
+      }
+    },
+    "total_avg_ms": 38,
+    "total_min_ms": 36
+  },
+  {
+    "name": "Google V8 (Full JIT - TurboFan)",
+    "category": "Upstream V8",
+    "benchmarks": {
+      "1. Loop & Arithmetic Throughput (500k ops)": {
+        "avg_ms": 4,
+        "min_ms": 3,
+        "max_ms": 5,
+        "std_ms": 1.0,
+        "result": "99482507"
+      },
+      "2. Recursive Fibonacci fib(26)": {
+        "avg_ms": 2,
+        "min_ms": 2,
+        "max_ms": 2,
+        "std_ms": 0.0,
+        "result": "121393"
+      },
+      "3. Object Creation & IC Access (20k objs)": {
+        "avg_ms": 1.3,
+        "min_ms": 1,
+        "max_ms": 2,
+        "std_ms": 0.6,
+        "result": "99969965"
+      },
+      "4. TypedArray Int32Array (20k elements)": {
+        "avg_ms": 1,
+        "min_ms": 1,
+        "max_ms": 1,
+        "std_ms": 0.0,
+        "result": "19265126"
+      },
+      "5. Array Push & Iteration (20k elements)": {
+        "avg_ms": 1.7,
+        "min_ms": 1,
+        "max_ms": 2,
+        "std_ms": 0.6,
+        "result": "99989993"
+      },
+      "6. String Concatenation & Slicing (10k ops)": {
+        "avg_ms": 1,
+        "min_ms": 1,
+        "max_ms": 1,
+        "std_ms": 0.0,
+        "result": "2500"
+      }
+    },
+    "total_avg_ms": 11,
+    "total_min_ms": 9
+  }
+]
