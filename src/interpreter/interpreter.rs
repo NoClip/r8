@@ -4813,25 +4813,27 @@ impl InterpreterVM {
                                                                     acc = checksum;
                                                                 }
                                                                 SmiOp::FusedObjectShapesLoop { total_slot, ind_slot, mod_slot, mul_val, step } => {
-                                                                    let mut total = unsafe { *regs.get_unchecked(total_slot as usize) };
-                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
-                                                                    let lim = limit_v;
-                                                                    let m = unsafe { *regs.get_unchecked(mod_slot as usize) };
+                                                                    let mut total = unsafe { *regs.get_unchecked(total_slot as usize) } as i64;
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) } as i64;
+                                                                    let lim = limit_v as i64;
+                                                                    let m = unsafe { *regs.get_unchecked(mod_slot as usize) } as i64;
+                                                                    let mul_i64 = mul_val as i64;
+                                                                    let step_i64 = step as i64;
                                                                     if m != 0 && step != 0 {
                                                                         while if is_lt { i < lim } else { i <= lim } {
                                                                             let x = i;
-                                                                            let y = i.wrapping_mul(mul_val);
-                                                                            let sum = x.wrapping_add(y);
-                                                                            total = (total.wrapping_add(sum)) % m;
-                                                                            i += step;
+                                                                            let y = i * mul_i64;
+                                                                            let sum = x + y;
+                                                                            total = (total + sum) % m;
+                                                                            i += step_i64;
                                                                         }
                                                                     }
                                                                     unsafe {
-                                                                        *regs.get_unchecked_mut(total_slot as usize) = total;
-                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                        *regs.get_unchecked_mut(total_slot as usize) = total as i32;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
                                                                     }
                                                                     if let Some((_, _)) = obj_meta {
-                                                                        let last_i = i - step;
+                                                                        let last_i = (i - step_i64) as i32;
                                                                         let x = last_i;
                                                                         let y = last_i.wrapping_mul(mul_val);
                                                                         let sum = x.wrapping_add(y);
@@ -4839,56 +4841,60 @@ impl InterpreterVM {
                                                                         obj_props[1] = y;
                                                                         obj_props[2] = sum;
                                                                     }
-                                                                    acc = total;
+                                                                    acc = total as i32;
                                                                 }
                                                                 SmiOp::FusedTypedArrayInitLoop { target_slot: _, ind_slot, mul_val, mask_slot, step } => {
-                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
-                                                                    let lim = limit_v as usize;
-                                                                    let mask = unsafe { *regs.get_unchecked(mask_slot as usize) };
-                                                                    if !ta_i32_ptr.is_null() && step == 1 {
+                                                                    let raw_i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    if raw_i >= 0 && limit_v >= 0 && !ta_i32_ptr.is_null() && step == 1 {
+                                                                        let mut i = raw_i as usize;
+                                                                        let lim = limit_v as usize;
+                                                                        let mask = unsafe { *regs.get_unchecked(mask_slot as usize) };
                                                                         let max_idx = lim.min(ta_len);
                                                                         while i < max_idx {
                                                                             unsafe { *ta_i32_ptr.add(i) = ((i as i32).wrapping_mul(mul_val)) & mask; }
                                                                             i += 1;
                                                                         }
+                                                                        unsafe {
+                                                                            *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
+                                                                        }
+                                                                        acc = i as i32;
                                                                     }
-                                                                    unsafe {
-                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
-                                                                    }
-                                                                    acc = i as i32;
                                                                 }
                                                                 SmiOp::FusedArrayPushLoop { arr_slot: _, ind_slot, mul_val, add_val, mask_slot, step } => {
-                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
-                                                                    let lim = limit_v as usize;
-                                                                    let mask = unsafe { *regs.get_unchecked(mask_slot as usize) };
-                                                                    if let Some(elems_ptr) = arr_elems_ptr {
-                                                                        let elems = unsafe { &mut *elems_ptr };
-                                                                        let needed = lim.saturating_sub(i);
-                                                                        elems.reserve(needed);
-                                                                        if step == 1 {
+                                                                    let raw_i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    if raw_i >= 0 && limit_v >= 0 && step == 1 {
+                                                                        let mut i = raw_i as usize;
+                                                                        let lim = limit_v as usize;
+                                                                        let mask = unsafe { *regs.get_unchecked(mask_slot as usize) };
+                                                                        if let Some(elems_ptr) = arr_elems_ptr {
+                                                                            let elems = unsafe { &mut *elems_ptr };
+                                                                            let needed = lim.saturating_sub(i);
+                                                                            elems.reserve(needed);
                                                                             while i < lim {
                                                                                 let val = ((i as i32).wrapping_mul(mul_val).wrapping_add(add_val)) & mask;
                                                                                 elems.push(JSValue::Smi(val));
                                                                                 i += 1;
                                                                             }
                                                                         }
+                                                                        unsafe {
+                                                                            *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
+                                                                        }
+                                                                        acc = i as i32;
                                                                     }
-                                                                    unsafe {
-                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
-                                                                    }
-                                                                    acc = i as i32;
                                                                 }
                                                                 SmiOp::FusedKeyedSumLoop { target_slot: _, sum_slot, ind_slot, mod_slot, step } => {
-                                                                    let mut sum = unsafe { *regs.get_unchecked(sum_slot as usize) };
-                                                                    let mut j = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
-                                                                    let lim = limit_v as usize;
+                                                                    let raw_j = unsafe { *regs.get_unchecked(ind_slot as usize) };
                                                                     let m = unsafe { *regs.get_unchecked(mod_slot as usize) };
-                                                                    if m != 0 && step == 1 {
+                                                                    if raw_j >= 0 && limit_v >= 0 && m != 0 && step == 1 {
+                                                                        let mut sum = unsafe { *regs.get_unchecked(sum_slot as usize) } as i64;
+                                                                        let mut j = raw_j as usize;
+                                                                        let lim = limit_v as usize;
+                                                                        let m_i64 = m as i64;
                                                                         if !ta_i32_ptr.is_null() {
                                                                             let max_idx = lim.min(ta_len);
                                                                             while j < max_idx {
-                                                                                let val = unsafe { *ta_i32_ptr.add(j) };
-                                                                                sum = (sum.wrapping_add(val)) % m;
+                                                                                let val = unsafe { *ta_i32_ptr.add(j) } as i64;
+                                                                                sum = (sum + val) % m_i64;
                                                                                 j += 1;
                                                                             }
                                                                         } else if let Some(elems_ptr) = arr_elems_ptr {
@@ -4896,19 +4902,19 @@ impl InterpreterVM {
                                                                             let max_idx = lim.min(elems.len());
                                                                             while j < max_idx {
                                                                                 let val = match unsafe { elems.get_unchecked(j) } {
-                                                                                    JSValue::Smi(v) => *v,
-                                                                                    other => other.to_number() as i32,
+                                                                                    JSValue::Smi(v) => *v as i64,
+                                                                                    other => other.to_number() as i64,
                                                                                 };
-                                                                                sum = (sum.wrapping_add(val)) % m;
+                                                                                sum = (sum + val) % m_i64;
                                                                                 j += 1;
                                                                             }
                                                                         }
+                                                                        unsafe {
+                                                                            *regs.get_unchecked_mut(sum_slot as usize) = sum as i32;
+                                                                            *regs.get_unchecked_mut(ind_slot as usize) = j as i32;
+                                                                        }
+                                                                        acc = sum as i32;
                                                                     }
-                                                                    unsafe {
-                                                                        *regs.get_unchecked_mut(sum_slot as usize) = sum;
-                                                                        *regs.get_unchecked_mut(ind_slot as usize) = j as i32;
-                                                                    }
-                                                                    acc = sum;
                                                                 }
                                                             }
                                                         }
