@@ -2484,8 +2484,13 @@ impl InterpreterVM {
                                         drop(borrowed);
                                         obj.borrow().get_property(name_str)
                                     }
+                                } else if let Some(func) = cur_bc!().get_cached_proto_method(inst_start, map_ptr) {
+                                    JSValue::Function(func)
                                 } else if borrowed.ext.is_some() && (borrowed.ext_or_default().regexp_data.is_some() || borrowed.ext_or_default().typed_array_data.is_some() || borrowed.ext_or_default().data_view_data.is_some()) {
                                     let val = borrowed.get_property(name_str);
+                                    if let JSValue::Function(ref f) = val {
+                                        cur_bc!().set_cached_proto_method(inst_start, map_ptr, f.clone());
+                                    }
                                     drop(borrowed);
                                     val
                                 } else {
@@ -2504,7 +2509,11 @@ impl InterpreterVM {
                                             } else {
                                                 drop(map);
                                                 drop(borrowed);
-                                                obj.borrow().get_property(name_str)
+                                                let val = obj.borrow().get_property(name_str);
+                                                if let JSValue::Function(ref f) = val {
+                                                    cur_bc!().set_cached_proto_method(inst_start, map_ptr, f.clone());
+                                                }
+                                                val
                                             }
                                         } else {
                                             drop(map);

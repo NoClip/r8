@@ -454,22 +454,31 @@ pub fn create_data_view_prototype() -> Rc<RefCell<JSObject>> {
         ($proto:expr, $get_name:literal, $set_name:literal, $size:literal, $get_expr:expr, $set_expr:expr) => {
             let get_fn = JSFunction::new_native($get_name, move |this, args| {
                 let dv_obj = match this {
-                    JSValue::Object(o) => o.clone(),
+                    JSValue::Object(o) => o,
                     _ => return Err("Method called on non-object".to_string()),
                 };
-                let dv = dv_obj.borrow().ext_or_default().data_view_data.clone()
+                let dv_borrow = dv_obj.borrow();
+                let ext = dv_borrow.ext_or_default();
+                let dv = ext.data_view_data.as_ref()
                     .ok_or_else(|| "Receiver is not a DataView".to_string())?;
 
-                let offset = args.get(0).map(|v| v.to_number().max(0.0) as usize).unwrap_or(0);
-                let little_endian = args.get(1).map(|v| v.to_boolean()).unwrap_or(false);
+                let offset = match args.get(0) {
+                    Some(JSValue::Smi(s)) => if *s >= 0 { *s as usize } else { 0 },
+                    Some(v) => v.to_number().max(0.0) as usize,
+                    None => 0,
+                };
+                let little_endian = match args.get(1) {
+                    Some(v) => v.to_boolean(),
+                    None => false,
+                };
 
                 if offset + $size > dv.byte_length {
                     return Err("Offset is outside the bounds of the DataView".to_string());
                 }
 
-                let buf_rc = dv.buffer.clone();
-                let buf_obj = buf_rc.borrow();
-                let bytes_rc = buf_obj.ext_or_default().array_buffer_data.clone().ok_or_else(|| "Buffer error".to_string())?;
+                let buf_obj = dv.buffer.borrow();
+                let ext_buf = buf_obj.ext_or_default();
+                let bytes_rc = ext_buf.array_buffer_data.as_ref().ok_or_else(|| "Buffer error".to_string())?;
                 let bytes = bytes_rc.borrow();
                 let pos = dv.byte_offset + offset;
 
@@ -479,27 +488,37 @@ pub fn create_data_view_prototype() -> Rc<RefCell<JSObject>> {
 
             let set_fn = JSFunction::new_native($set_name, move |this, args| {
                 let dv_obj = match this {
-                    JSValue::Object(o) => o.clone(),
+                    JSValue::Object(o) => o,
                     _ => return Err("Method called on non-object".to_string()),
                 };
-                let dv = dv_obj.borrow().ext_or_default().data_view_data.clone()
+                let dv_borrow = dv_obj.borrow();
+                let ext = dv_borrow.ext_or_default();
+                let dv = ext.data_view_data.as_ref()
                     .ok_or_else(|| "Receiver is not a DataView".to_string())?;
 
-                let offset = args.get(0).map(|v| v.to_number().max(0.0) as usize).unwrap_or(0);
-                let val = args.get(1).cloned().unwrap_or(JSValue::Smi(0));
-                let little_endian = args.get(2).map(|v| v.to_boolean()).unwrap_or(false);
+                let offset = match args.get(0) {
+                    Some(JSValue::Smi(s)) => if *s >= 0 { *s as usize } else { 0 },
+                    Some(v) => v.to_number().max(0.0) as usize,
+                    None => 0,
+                };
+                let default_val = JSValue::Smi(0);
+                let val = args.get(1).unwrap_or(&default_val);
+                let little_endian = match args.get(2) {
+                    Some(v) => v.to_boolean(),
+                    None => false,
+                };
 
                 if offset + $size > dv.byte_length {
                     return Err("Offset is outside the bounds of the DataView".to_string());
                 }
 
-                let buf_rc = dv.buffer.clone();
-                let buf_obj = buf_rc.borrow();
-                let bytes_rc = buf_obj.ext_or_default().array_buffer_data.clone().ok_or_else(|| "Buffer error".to_string())?;
+                let buf_obj = dv.buffer.borrow();
+                let ext_buf = buf_obj.ext_or_default();
+                let bytes_rc = ext_buf.array_buffer_data.as_ref().ok_or_else(|| "Buffer error".to_string())?;
                 let mut bytes = bytes_rc.borrow_mut();
                 let pos = dv.byte_offset + offset;
 
-                $set_expr(&mut bytes[pos..pos + $size], &val, little_endian);
+                $set_expr(&mut bytes[pos..pos + $size], val, little_endian);
                 Ok(JSValue::Undefined)
             });
             JSObject::set_property($proto, $set_name, JSValue::Function(set_fn));
