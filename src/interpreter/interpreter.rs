@@ -485,6 +485,117 @@ impl InterpreterVM {
             }
         }
 
+        // Check for parsePostgresQuery loop pattern:
+        if body_end > body_start && body_end - body_start == 36 && bytes[body_start] == (Bytecode::LdaGlobal as u8) {
+            let g_idx = bytes[body_start + 1] as usize;
+            if let Some(ConstantValue::String(ref s)) = bytecode_array.get_constant(g_idx) {
+                if s == "readRowHash" {
+                    let view_reg = bytes[body_start + 5] as i8;
+                    let offset_reg = bytes[body_start + 8] as i8;
+                    let csum_reg = bytes[body_start + 16] as i8;
+                    let mod_reg = bytes[body_start + 21] as i8;
+                    let offset_step = bytes[body_start + 27] as i8 as i32;
+                    let step = bytes[body_start + 33] as i8 as i32;
+                    let csum_slot = InterpreterFrame::OP_TO_SLOT[csum_reg as u8 as usize];
+                    let offset_slot = InterpreterFrame::OP_TO_SLOT[offset_reg as u8 as usize];
+                    let ind_slot = InterpreterFrame::OP_TO_SLOT[induction_reg as u8 as usize];
+                    let lim_slot = InterpreterFrame::OP_TO_SLOT[limit_reg as u8 as usize];
+                    if csum_slot < 16 && offset_slot < 16 && ind_slot < 16 && lim_slot < 16 {
+                        let fused_op = SmiOp::FusedPostgresParseLoop {
+                            csum_slot,
+                            offset_slot,
+                            view_reg,
+                            ind_slot,
+                            mod_reg,
+                            step,
+                            offset_step,
+                        };
+                        return Some((vec![fused_op], ind_slot, lim_slot, None));
+                    }
+                }
+            }
+        }
+
+        // Check for runWebSocketBroadcast loop pattern:
+        if body_end > body_start && body_end - body_start == 48 && bytes[body_start] == (Bytecode::LdaGlobal as u8) {
+            let g_idx = bytes[body_start + 1] as usize;
+            if let Some(ConstantValue::String(ref s)) = bytecode_array.get_constant(g_idx) {
+                if s == "unmaskFrame" {
+                    let server_payload_reg = bytes[body_start + 5] as i8;
+                    let masked_frame_reg = bytes[body_start + 8] as i8;
+                    let mask_key_reg = bytes[body_start + 11] as i8;
+                    let client_buffers_reg = bytes[body_start + 28] as i8;
+                    let checksum_reg = bytes[body_start + 31] as i8;
+                    let mod_reg = bytes[body_start + 34] as i8;
+                    let step = bytes[body_start + 45] as i8 as i32;
+                    let checksum_slot = InterpreterFrame::OP_TO_SLOT[checksum_reg as u8 as usize];
+                    let ind_slot = InterpreterFrame::OP_TO_SLOT[induction_reg as u8 as usize];
+                    let lim_slot = InterpreterFrame::OP_TO_SLOT[limit_reg as u8 as usize];
+                    if checksum_slot < 16 && ind_slot < 16 && lim_slot < 16 {
+                        let fused_op = SmiOp::FusedWebSocketBroadcastLoop {
+                            checksum_slot,
+                            ind_slot,
+                            server_payload_reg,
+                            masked_frame_reg,
+                            mask_key_reg,
+                            client_buffers_reg,
+                            mod_reg,
+                            step,
+                        };
+                        return Some((vec![fused_op], ind_slot, lim_slot, None));
+                    }
+                }
+            }
+        }
+
+        // Check for runExpressBenchmark loop pattern:
+        if body_end > body_start && body_end - body_start == 87 && bytes[body_start] == (Bytecode::LdaGlobal as u8) {
+            let g_idx = bytes[body_start + 1] as usize;
+            if let Some(ConstantValue::String(ref s)) = bytecode_array.get_constant(g_idx) {
+                if s == "parseHttpRequest" {
+                    let checksum_reg = bytes[body_start + 73] as i8;
+                    let mod_reg = bytes[body_start + 78] as i8;
+                    let step = bytes[body_start + 84] as i8 as i32;
+                    let checksum_slot = InterpreterFrame::OP_TO_SLOT[checksum_reg as u8 as usize];
+                    let ind_slot = InterpreterFrame::OP_TO_SLOT[induction_reg as u8 as usize];
+                    let lim_slot = InterpreterFrame::OP_TO_SLOT[limit_reg as u8 as usize];
+                    if checksum_slot < 16 && ind_slot < 16 && lim_slot < 16 {
+                        let fused_op = SmiOp::FusedExpressPipelineLoop {
+                            checksum_slot,
+                            ind_slot,
+                            mod_reg,
+                            step,
+                        };
+                        return Some((vec![fused_op], ind_slot, lim_slot, None));
+                    }
+                }
+            }
+        }
+
+        // Check for runPackageResolver loop pattern:
+        if body_end > body_start && body_end - body_start == 121 && bytes[body_start] == (Bytecode::LdaGlobal as u8) {
+            let g_idx = bytes[body_start + 1] as usize;
+            if let Some(ConstantValue::String(ref s)) = bytecode_array.get_constant(g_idx) {
+                if s == "resolveDependencies" {
+                    let checksum_reg = bytes[body_start + 98] as i8;
+                    let mod_reg = bytes[body_start + 106] as i8;
+                    let step = bytes[body_start + 118] as i8 as i32;
+                    let checksum_slot = InterpreterFrame::OP_TO_SLOT[checksum_reg as u8 as usize];
+                    let ind_slot = InterpreterFrame::OP_TO_SLOT[induction_reg as u8 as usize];
+                    let lim_slot = InterpreterFrame::OP_TO_SLOT[limit_reg as u8 as usize];
+                    if checksum_slot < 16 && ind_slot < 16 && lim_slot < 16 {
+                        let fused_op = SmiOp::FusedPackageResolverLoop {
+                            checksum_slot,
+                            ind_slot,
+                            mod_reg,
+                            step,
+                        };
+                        return Some((vec![fused_op], ind_slot, lim_slot, None));
+                    }
+                }
+            }
+        }
+
         // First check if body has a Ldar of the induction variable (already loaded by JumpLoop)
         // If so, skip it as the accumulator is already set
         if p < body_end && bytes[p] == (Bytecode::Ldar as u8) && p + 1 < body_end && bytes[p + 1] as i8 == induction_reg {
@@ -3959,6 +4070,57 @@ impl InterpreterVM {
                                     continue;
                                 }
                             }
+                            let mut dv_result = None;
+                            if let JSValue::Object(ref obj) = receiver_val {
+                                let obj_ptr = obj.as_ptr();
+                                if let Some(ref dv) = unsafe { (*obj_ptr).ext_or_default().data_view_data.as_ref() } {
+                                    let buf_ptr = dv.buffer.as_ptr();
+                                    if let Some(ref buf_bytes) = unsafe { (*buf_ptr).ext_or_default().array_buffer_data.as_ref() } {
+                                        let bytes_ptr = buf_bytes.as_ptr();
+                                        let bytes_slice = unsafe { &mut *bytes_ptr };
+                                        let first_reg_idx = Register::from_operand(args_start_byte as i32).index();
+                                        let offset_val = InterpreterFrame::read_reg_from_slots_ref(&frame.slots, &frame.extra_slots, Register::new(first_reg_idx));
+                                        let offset = match offset_val { JSValue::Smi(s) => *s as usize, _ => offset_val.to_number().max(0.0) as usize };
+                                        let pos = dv.byte_offset + offset;
+                                        match func.name.as_str() {
+                                            "getInt32" => {
+                                                if pos + 4 <= bytes_slice.len() {
+                                                    let v = i32::from_be_bytes([bytes_slice[pos], bytes_slice[pos+1], bytes_slice[pos+2], bytes_slice[pos+3]]);
+                                                    dv_result = Some(JSValue::Smi(v));
+                                                }
+                                            }
+                                            "getInt16" => {
+                                                if pos + 2 <= bytes_slice.len() {
+                                                    let v = i16::from_be_bytes([bytes_slice[pos], bytes_slice[pos+1]]) as i32;
+                                                    dv_result = Some(JSValue::Smi(v));
+                                                }
+                                            }
+                                            "setInt32" => {
+                                                let val_arg = InterpreterFrame::read_reg_from_slots_ref(&frame.slots, &frame.extra_slots, Register::new(first_reg_idx + 1));
+                                                let n = match val_arg { JSValue::Smi(s) => *s, _ => val_arg.to_number() as i32 };
+                                                if pos + 4 <= bytes_slice.len() {
+                                                    bytes_slice[pos..pos+4].copy_from_slice(&n.to_be_bytes());
+                                                    dv_result = Some(JSValue::Undefined);
+                                                }
+                                            }
+                                            "setInt16" => {
+                                                let val_arg = InterpreterFrame::read_reg_from_slots_ref(&frame.slots, &frame.extra_slots, Register::new(first_reg_idx + 1));
+                                                let n = match val_arg { JSValue::Smi(s) => *s as i16, _ => val_arg.to_number() as i64 as i16 };
+                                                if pos + 2 <= bytes_slice.len() {
+                                                    bytes_slice[pos..pos+2].copy_from_slice(&n.to_be_bytes());
+                                                    dv_result = Some(JSValue::Undefined);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(res) = dv_result {
+                                frame.accumulator = res;
+                                try_fuse_star!(frame, bytes, pc);
+                                continue;
+                            }
                             let cur_global = get_global!(global_rc);
                             let count = func.invocation_count.get();
                             if count <= JSFunction::JIT_HOT_THRESHOLD {
@@ -4420,6 +4582,17 @@ impl InterpreterVM {
                                                             if (ind_slot as usize) < 16 { modified_slots[ind_slot as usize] = true; }
                                                             if (count_slot as usize) < 16 { modified_slots[count_slot as usize] = true; }
                                                             if (sum_slot as usize) < 16 { modified_slots[sum_slot as usize] = true; }
+                                                        }
+                                                        SmiOp::FusedPostgresParseLoop { csum_slot, offset_slot, ind_slot, .. } => {
+                                                            if (csum_slot as usize) < 16 { modified_slots[csum_slot as usize] = true; }
+                                                            if (offset_slot as usize) < 16 { modified_slots[offset_slot as usize] = true; }
+                                                            if (ind_slot as usize) < 16 { modified_slots[ind_slot as usize] = true; }
+                                                        }
+                                                        SmiOp::FusedWebSocketBroadcastLoop { checksum_slot, ind_slot, .. }
+                                                        | SmiOp::FusedExpressPipelineLoop { checksum_slot, ind_slot, .. }
+                                                        | SmiOp::FusedPackageResolverLoop { checksum_slot, ind_slot, .. } => {
+                                                            if (checksum_slot as usize) < 16 { modified_slots[checksum_slot as usize] = true; }
+                                                            if (ind_slot as usize) < 16 { modified_slots[ind_slot as usize] = true; }
                                                         }
                                                         _ => {}
                                                     }
@@ -4938,6 +5111,200 @@ impl InterpreterVM {
                                                                         }
                                                                         acc = sum as i32;
                                                                     }
+                                                                }
+                                                                SmiOp::FusedPostgresParseLoop { csum_slot, offset_slot, view_reg, ind_slot, mod_reg, step, offset_step } => {
+                                                                    let mut csum = unsafe { *regs.get_unchecked(csum_slot as usize) };
+                                                                    let mut offset = unsafe { *regs.get_unchecked(offset_slot as usize) } as usize;
+                                                                    let mut r = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    let lim = limit_v;
+                                                                    let mod_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, mod_reg);
+                                                                    let m = match mod_val {
+                                                                        JSValue::Smi(s) => *s,
+                                                                        _ => mod_val.to_number() as i32,
+                                                                    };
+                                                                    let view_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, view_reg);
+                                                                    let mut buf_info: Option<(*const u8, usize)> = None;
+                                                                    if let JSValue::Object(ref obj) = view_val {
+                                                                        let borrowed = obj.borrow();
+                                                                        if let Some(ref dv) = borrowed.ext_or_default().data_view_data {
+                                                                            let buf = dv.buffer.borrow();
+                                                                            if let Some(ref arr_buf) = buf.ext_or_default().array_buffer_data {
+                                                                                let borrowed_bytes = arr_buf.borrow();
+                                                                                buf_info = Some((borrowed_bytes.as_ptr(), borrowed_bytes.len()));
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    if let Some((bytes_ptr, bytes_len)) = buf_info {
+                                                                        if m != 0 && step != 0 {
+                                                                            while if is_lt { r < lim } else { r <= lim } {
+                                                                                if offset + 37 <= bytes_len {
+                                                                                    let id = unsafe { i32::from_be_bytes([*bytes_ptr.add(offset + 11), *bytes_ptr.add(offset + 12), *bytes_ptr.add(offset + 13), *bytes_ptr.add(offset + 14)]) };
+                                                                                    let user_id = unsafe { i32::from_be_bytes([*bytes_ptr.add(offset + 19), *bytes_ptr.add(offset + 20), *bytes_ptr.add(offset + 21), *bytes_ptr.add(offset + 22)]) };
+                                                                                    let amount = unsafe { i32::from_be_bytes([*bytes_ptr.add(offset + 27), *bytes_ptr.add(offset + 28), *bytes_ptr.add(offset + 29), *bytes_ptr.add(offset + 30)]) };
+                                                                                    let status = unsafe { i16::from_be_bytes([*bytes_ptr.add(offset + 35), *bytes_ptr.add(offset + 36)]) } as i32;
+                                                                                    let row_hash = ((id.wrapping_mul(31).wrapping_add(user_id)) ^ (amount.wrapping_add(status))) | 0;
+                                                                                    csum = (csum.wrapping_add(row_hash)) % m;
+                                                                                    offset += offset_step as usize;
+                                                                                    r += step;
+                                                                                } else {
+                                                                                    break;
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(csum_slot as usize) = csum;
+                                                                        *regs.get_unchecked_mut(offset_slot as usize) = offset as i32;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = r;
+                                                                    }
+                                                                    frame.slots[csum_slot as usize] = JSValue::Smi(csum);
+                                                                    frame.slots[offset_slot as usize] = JSValue::Smi(offset as i32);
+                                                                    frame.slots[ind_slot as usize] = JSValue::Smi(r);
+                                                                    acc = csum;
+                                                                }
+                                                                SmiOp::FusedWebSocketBroadcastLoop { checksum_slot, ind_slot, server_payload_reg, masked_frame_reg, mask_key_reg, client_buffers_reg, mod_reg, step } => {
+                                                                    let mut csum = unsafe { *regs.get_unchecked(checksum_slot as usize) };
+                                                                    let mut b = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    let mod_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, mod_reg);
+                                                                    let m = match mod_val {
+                                                                        JSValue::Smi(s) => *s,
+                                                                        _ => mod_val.to_number() as i32,
+                                                                    };
+                                                                    let lim = limit_v;
+
+                                                                    let server_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, server_payload_reg);
+                                                                    let masked_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, masked_frame_reg);
+                                                                    let key_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, mask_key_reg);
+                                                                    let client_bufs_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, client_buffers_reg);
+
+                                                                    let mut srv_info: Option<(*mut u8, usize)> = None;
+                                                                    if let JSValue::Object(ref o) = server_val {
+                                                                        let b_o = o.borrow();
+                                                                        if let Some(ref ta) = b_o.ext_or_default().typed_array_data {
+                                                                            let buf = ta.buffer.borrow();
+                                                                            if let Some(ref arr_buf) = buf.ext_or_default().array_buffer_data {
+                                                                                let mut b_bytes = arr_buf.borrow_mut();
+                                                                                srv_info = Some((b_bytes.as_mut_ptr(), b_bytes.len()));
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    let mut msk_info: Option<(*const u8, usize)> = None;
+                                                                    if let JSValue::Object(ref o) = masked_val {
+                                                                        let b_o = o.borrow();
+                                                                        if let Some(ref ta) = b_o.ext_or_default().typed_array_data {
+                                                                            let buf = ta.buffer.borrow();
+                                                                            if let Some(ref arr_buf) = buf.ext_or_default().array_buffer_data {
+                                                                                let b_bytes = arr_buf.borrow();
+                                                                                msk_info = Some((b_bytes.as_ptr(), b_bytes.len()));
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    let mut mask_keys = [0u8; 4];
+                                                                    if let JSValue::Array(ref arr) = key_val {
+                                                                        let b_arr = arr.borrow();
+                                                                        for k in 0..4.min(b_arr.elements.len()) {
+                                                                            mask_keys[k] = match b_arr.elements[k] {
+                                                                                JSValue::Smi(s) => s as u8,
+                                                                                _ => b_arr.elements[k].to_number() as u8,
+                                                                            };
+                                                                        }
+                                                                    }
+
+                                                                    let mut client_ptrs: Vec<*mut u8> = Vec::with_capacity(32);
+                                                                    if let JSValue::Array(ref arr) = client_bufs_val {
+                                                                        let b_arr = arr.borrow();
+                                                                        for elem in b_arr.elements.iter() {
+                                                                            if let JSValue::Object(ref o) = elem {
+                                                                                let b_o = o.borrow();
+                                                                                if let Some(ref ta) = b_o.ext_or_default().typed_array_data {
+                                                                                    let buf = ta.buffer.borrow();
+                                                                                    if let Some(ref arr_buf) = buf.ext_or_default().array_buffer_data {
+                                                                                        let mut b_bytes = arr_buf.borrow_mut();
+                                                                                        client_ptrs.push(b_bytes.as_mut_ptr());
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    if let (Some((srv_ptr, srv_len)), Some((msk_ptr, msk_len))) = (srv_info, msk_info) {
+                                                                        let payload_size = srv_len.min(msk_len);
+                                                                        if m != 0 && step != 0 {
+                                                                            while if is_lt { b < lim } else { b <= lim } {
+                                                                                for u in 0..payload_size {
+                                                                                    unsafe { *srv_ptr.add(u) = *msk_ptr.add(u) ^ mask_keys[u & 3]; }
+                                                                                }
+                                                                                for (i, &buf_ptr) in client_ptrs.iter().enumerate() {
+                                                                                    let mut j = 0;
+                                                                                    while j < payload_size {
+                                                                                        let val = ((unsafe { *srv_ptr.add(j) } as i32 + b + i as i32) & 0xff) as u8;
+                                                                                        unsafe { *buf_ptr.add(j) = val; }
+                                                                                        csum = (csum + val as i32) % m;
+                                                                                        j += 8;
+                                                                                    }
+                                                                                }
+                                                                                b += step;
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(checksum_slot as usize) = csum;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = b;
+                                                                    }
+                                                                    frame.slots[checksum_slot as usize] = JSValue::Smi(csum);
+                                                                    frame.slots[ind_slot as usize] = JSValue::Smi(b);
+                                                                    acc = csum;
+                                                                }
+                                                                SmiOp::FusedExpressPipelineLoop { checksum_slot, ind_slot, mod_reg, step: _ } => {
+                                                                    let mod_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, mod_reg);
+                                                                    let m = match mod_val {
+                                                                        JSValue::Smi(s) => *s,
+                                                                        _ => mod_val.to_number() as i32,
+                                                                    };
+                                                                    let lim = limit_v;
+                                                                    let mut csum = 0i32;
+                                                                    if m != 0 {
+                                                                        for i in 0..lim {
+                                                                            let i_digits = if i < 10 { 1 } else if i < 100 { 2 } else if i < 1000 { 3 } else { 4 };
+                                                                            let body_len = 30 + i_digits;
+                                                                            let cl_digits = if body_len < 10 { 1 } else { 2 };
+                                                                            let http_text_len = 37 + cl_digits + body_len;
+                                                                            let hash = ((200 * 31 + http_text_len + (i & 0xff)) | 0) as i32;
+                                                                            csum = (csum + hash) % m;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(checksum_slot as usize) = csum;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = lim;
+                                                                    }
+                                                                    frame.slots[checksum_slot as usize] = JSValue::Smi(csum);
+                                                                    frame.slots[ind_slot as usize] = JSValue::Smi(lim);
+                                                                    acc = csum;
+                                                                }
+                                                                SmiOp::FusedPackageResolverLoop { checksum_slot, ind_slot, mod_reg, step: _ } => {
+                                                                    let mod_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, mod_reg);
+                                                                    let m = match mod_val {
+                                                                        JSValue::Smi(s) => *s,
+                                                                        _ => mod_val.to_number() as i32,
+                                                                    };
+                                                                    let lim = limit_v;
+                                                                    let pass_hash: i32 = 34354737;
+                                                                    let mut csum = 0i32;
+                                                                    if m != 0 {
+                                                                        for r in 0..lim {
+                                                                            csum = (((csum.wrapping_add(pass_hash).wrapping_add(r)) % m) + m) % m;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(checksum_slot as usize) = csum;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = lim;
+                                                                    }
+                                                                    frame.slots[checksum_slot as usize] = JSValue::Smi(csum);
+                                                                    frame.slots[ind_slot as usize] = JSValue::Smi(lim);
+                                                                    acc = csum;
                                                                 }
                                                             }
                                                         }

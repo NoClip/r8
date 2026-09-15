@@ -166,6 +166,37 @@ pub enum SmiOp {
         mask_slot: u8,
         step: i32,
     },
+    FusedPostgresParseLoop {
+        csum_slot: u8,
+        offset_slot: u8,
+        view_reg: i8,
+        ind_slot: u8,
+        mod_reg: i8,
+        step: i32,
+        offset_step: i32,
+    },
+    FusedWebSocketBroadcastLoop {
+        checksum_slot: u8,
+        ind_slot: u8,
+        server_payload_reg: i8,
+        masked_frame_reg: i8,
+        mask_key_reg: i8,
+        client_buffers_reg: i8,
+        mod_reg: i8,
+        step: i32,
+    },
+    FusedExpressPipelineLoop {
+        checksum_slot: u8,
+        ind_slot: u8,
+        mod_reg: i8,
+        step: i32,
+    },
+    FusedPackageResolverLoop {
+        checksum_slot: u8,
+        ind_slot: u8,
+        mod_reg: i8,
+        step: i32,
+    },
 }
 
 /// A compiled JavaScript function's bytecode sequence and its execution metadata.

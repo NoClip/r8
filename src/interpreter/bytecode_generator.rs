@@ -329,7 +329,7 @@ impl BytecodeGenerator {
                 }
 
                 let loop_end = self.builder.current_offset();
-                let loop_delta = -((loop_end - loop_start) as i8);
+                let loop_delta = (-((loop_end - loop_start) as isize)) as i8;
                 self.builder.jump_loop(loop_delta);
 
                 self.builder.patch_jump_to_current(exit_jump);
@@ -444,7 +444,7 @@ impl BytecodeGenerator {
                 }
 
                 let loop_end = self.builder.current_offset();
-                let loop_delta = -((loop_end - loop_start) as i8);
+                let loop_delta = (-((loop_end - loop_start) as isize)) as i8;
                 self.builder.jump_loop(loop_delta);
 
                 if let Some(placeholder) = exit_jump {
@@ -519,7 +519,7 @@ impl BytecodeGenerator {
                 }
 
                 let loop_end = self.builder.current_offset();
-                let loop_delta = -((loop_end - loop_start) as i8);
+                let loop_delta = (-((loop_end - loop_start) as isize)) as i8;
                 self.builder.jump_loop(loop_delta);
 
                 self.builder.patch_jump_to_current(exit_jump);
@@ -590,7 +590,7 @@ impl BytecodeGenerator {
                 self.builder.store_accumulator_in_register(idx_reg);
 
                 let loop_end = self.builder.current_offset();
-                let loop_delta = -((loop_end - loop_start) as i8);
+                let loop_delta = (-((loop_end - loop_start) as isize)) as i8;
                 self.builder.jump_loop(loop_delta);
 
                 self.builder.patch_jump_to_current(exit_jump);
@@ -1783,7 +1783,7 @@ impl BytecodeGenerator {
                     self.builder.emit_bytecode(Bytecode::SuspendGenerator);
 
                     let loop_end = self.builder.current_offset();
-                    let loop_delta = -((loop_end - loop_start) as i8);
+                    let loop_delta = (-((loop_end - loop_start) as isize)) as i8;
                     self.builder.jump_loop(loop_delta);
 
                     self.builder.patch_jump_to_current(exit_jump);
