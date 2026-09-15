@@ -100,7 +100,12 @@ impl InterpreterFrame {
         if idx >= 0 {
             4 + idx as usize
         } else {
-            (Register::FIRST_PARAM_REGISTER_INDEX - idx) as usize
+            let p = (Register::FIRST_PARAM_REGISTER_INDEX - idx) as usize;
+            if p < 4 {
+                p
+            } else {
+                16 + (p - 4)
+            }
         }
     }
 
@@ -188,7 +193,11 @@ impl InterpreterFrame {
             let slot = if op_i32 <= -6 {
                 (-2 - op_i32) as usize
             } else if op_i32 >= 3 {
-                (op_i32 - 3) as usize
+                if op_i32 < 7 {
+                    (op_i32 - 3) as usize
+                } else {
+                    16 + (op_i32 - 7) as usize
+                }
             } else {
                 (10 - op_i32) as usize
             };
@@ -4348,21 +4357,26 @@ impl InterpreterVM {
                                                     (None, std::ptr::null_mut(), std::ptr::null_mut(), 0)
                                                 };
 
-                                                let can_run_loop = !has_keyed_or_push || ta_data.is_some() || arr_target_slot.is_some();
-                                                if can_run_loop {
-
                                                 // Setup JSArray direct elements pointer
                                                 let arr_elems_ptr = if let Some(arr_slot) = arr_target_slot {
                                                     if let JSValue::Array(ref arr) = &frame.slots[arr_slot as usize] {
                                                         let ptr = unsafe { &mut (*arr.as_ptr()).elements };
-                                                        let has_push = ops.iter().any(|op| matches!(op, SmiOp::ArrayPush(_, _)));
-                                                        if has_push {
-                                                            let needed = (limit_v - regs[ind]).max(0) as usize;
-                                                            ptr.reserve(needed);
+                                                        let has_load = ops.iter().any(|op| matches!(op, SmiOp::LoadKeyed(tgt, _) if *tgt == arr_slot));
+                                                        if has_load && !ptr.iter().all(|e| matches!(e, JSValue::Smi(_))) {
+                                                            None
+                                                        } else {
+                                                            let has_push = ops.iter().any(|op| matches!(op, SmiOp::ArrayPush(_, _)));
+                                                            if has_push {
+                                                                let needed = (limit_v - regs[ind]).max(0) as usize;
+                                                                ptr.reserve(needed);
+                                                            }
+                                                            Some(ptr as *mut Vec<JSValue>)
                                                         }
-                                                        Some(ptr as *mut Vec<JSValue>)
                                                     } else { None }
                                                 } else { None };
+
+                                                let can_run_loop = !has_keyed_or_push || ta_data.is_some() || arr_elems_ptr.is_some();
+                                                if can_run_loop {
 
                                                 // Track which registers are written to as Smi
                                                 let mut modified_slots = [false; 16];
