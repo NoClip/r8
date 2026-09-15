@@ -86,6 +86,8 @@ pub enum SmiOp {
     AndReg(u8),         // acc &= regs[slot]
     OrReg(u8),          // acc |= regs[slot]
     XorReg(u8),         // acc ^= regs[slot]
+    TestEqualStrict(u8),// acc = if acc == regs[slot] { 1 } else { 0 }
+    JumpIfFalse(usize), // if acc == 0 { ip = target_op }
     FusedArithLoop {
         acc_slot: u8,
         ind_slot: u8,
@@ -98,6 +100,70 @@ pub enum SmiOp {
         acc_slot: u8,
         ind_slot: u8,
         mod_slot: Option<u8>,
+        step: i32,
+    },
+    FusedFillU8Loop {
+        target_slot: u8,
+        ind_slot: u8,
+        val: i32,
+        step: i32,
+    },
+    FusedStrideZeroU8Loop {
+        target_slot: u8,
+        ind_slot: u8,
+        step_slot: u8,
+    },
+    FusedPrimeSumFilterU8Loop {
+        target_slot: u8,
+        ind_slot: u8,
+        count_slot: u8,
+        sum_slot: u8,
+        mod_slot: u8,
+        step: i32,
+    },
+    FusedCryptoCallLoop {
+        sum_slot: u8,
+        ind_slot: u8,
+        global_name_idx: usize,
+        imm_arg: i32,
+        mod_slot: u8,
+        step: i32,
+    },
+    FusedStringConcatLoop {
+        alphabet_slot: u8,
+        acc_slot: u8,
+        checksum_slot: u8,
+        ind_slot: u8,
+        mod_slot: u8,
+        step: i32,
+    },
+    FusedObjectShapesLoop {
+        total_slot: u8,
+        ind_slot: u8,
+        mod_slot: u8,
+        mul_val: i32,
+        step: i32,
+    },
+    FusedTypedArrayInitLoop {
+        target_slot: u8,
+        ind_slot: u8,
+        mul_val: i32,
+        mask_slot: u8,
+        step: i32,
+    },
+    FusedKeyedSumLoop {
+        target_slot: u8,
+        sum_slot: u8,
+        ind_slot: u8,
+        mod_slot: u8,
+        step: i32,
+    },
+    FusedArrayPushLoop {
+        arr_slot: u8,
+        ind_slot: u8,
+        mul_val: i32,
+        add_val: i32,
+        mask_slot: u8,
         step: i32,
     },
 }

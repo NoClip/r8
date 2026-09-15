@@ -1,5 +1,5 @@
 [package]
-name = "v8_base_bits"
+name = "r8"
 version = "0.1.0"
 edition = "2021"
 

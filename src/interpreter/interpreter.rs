@@ -105,16 +105,21 @@ impl InterpreterFrame {
     }
 
     #[inline(always)]
-    pub fn read_register_ref(&self, reg: Register) -> &JSValue {
+    pub fn read_reg_from_slots_ref<'a>(slots: &'a [JSValue; 16], extra: &'a Option<Box<[JSValue]>>, reg: Register) -> &'a JSValue {
         let slot = Self::reg_to_slot(reg);
         if slot < 16 {
-            // SAFETY: slot < 16 is strictly within self.slots bounds.
-            unsafe { self.slots.get_unchecked(slot) }
-        } else if let Some(ref extra) = self.extra_slots {
-            extra.get(slot - 16).unwrap_or(&JSValue::Undefined)
+            // SAFETY: slot < 16 is strictly within slots bounds.
+            unsafe { slots.get_unchecked(slot) }
+        } else if let Some(ref extra_box) = extra {
+            extra_box.get(slot - 16).unwrap_or(&JSValue::Undefined)
         } else {
             &JSValue::Undefined
         }
+    }
+
+    #[inline(always)]
+    pub fn read_register_ref(&self, reg: Register) -> &JSValue {
+        Self::read_reg_from_slots_ref(&self.slots, &self.extra_slots, reg)
     }
 
     #[inline(always)]
@@ -291,6 +296,185 @@ impl InterpreterVM {
         let mut obj_target_reg: Option<i8> = None;
         let mut obj_alias_reg: Option<i8> = None;
         let mut prop_names: Vec<String> = Vec::new();
+        let mut op_byte_offsets: Vec<(usize, usize)> = Vec::new();
+        let mut jump_patches: Vec<(usize, usize)> = Vec::new();
+        let mut pending_push: Option<(u8, i8, i8)> = None;
+
+        // Check for fused crypto call accumulation loop pattern:
+        // Ldar sum_reg; Star temp_sum_reg;
+        // LdaGlobal name_idx, fb; Star fn_reg;
+        // Ldar ind_reg; Star arg1_reg;
+        // LdaSmi [imm]; Star arg2_reg;
+        // Ldar mod_reg; Star arg3_reg;
+        // CallUndefinedReceiver fn_reg, arg1_reg, 3;
+        // Star ret_reg;
+        // Ldar temp_sum_reg; Add ret_reg, fb; Mod mod_reg, fb; Star sum_reg;
+        // Ldar ind_reg; AddSmi [step], fb; Star ind_reg;
+        if body_start < body_end {
+            let mut c = body_start;
+            if bytes[c] == (Bytecode::Ldar as u8) && c + 1 < body_end {
+                let sum_reg = bytes[c + 1] as i8;
+                c += 2;
+                let (s_len, temp_sum_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                    (1, -6 - (bytes[c] - star0) as i8)
+                } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                    (2, bytes[c + 1] as i8)
+                } else { (0, 0) };
+                if s_len > 0 {
+                    c += s_len;
+                    if c + 2 < body_end && bytes[c] == (Bytecode::LdaGlobal as u8) {
+                        let name_idx = bytes[c + 1] as usize;
+                        c += 3; // LdaGlobal, name_idx, fb
+                        let (s_fn_len, fn_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                            (1, -6 - (bytes[c] - star0) as i8)
+                        } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                            (2, bytes[c + 1] as i8)
+                        } else { (0, 0) };
+                        if s_fn_len > 0 {
+                            c += s_fn_len;
+                            if c + 1 < body_end && bytes[c] == (Bytecode::Ldar as u8) && bytes[c + 1] as i8 == induction_reg {
+                                c += 2;
+                                let (s_a1_len, arg1_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                                    (1, -6 - (bytes[c] - star0) as i8)
+                                } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                                    (2, bytes[c + 1] as i8)
+                                } else { (0, 0) };
+                                if s_a1_len > 0 {
+                                    c += s_a1_len;
+                                    if c + 1 < body_end && bytes[c] == (Bytecode::LdaSmi as u8) {
+                                        let imm_arg = bytes[c + 1] as i8 as i32;
+                                        c += 2;
+                                        let (s_a2_len, _arg2_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                                            (1, -6 - (bytes[c] - star0) as i8)
+                                        } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                                            (2, bytes[c + 1] as i8)
+                                        } else { (0, 0) };
+                                        if s_a2_len > 0 {
+                                            c += s_a2_len;
+                                            if c + 1 < body_end && bytes[c] == (Bytecode::Ldar as u8) {
+                                                let mod_reg = bytes[c + 1] as i8;
+                                                c += 2;
+                                                let (s_a3_len, _arg3_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                                                    (1, -6 - (bytes[c] - star0) as i8)
+                                                } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                                                    (2, bytes[c + 1] as i8)
+                                                } else { (0, 0) };
+                                                if s_a3_len > 0 {
+                                                    c += s_a3_len;
+                                                    if c + 3 < body_end && bytes[c] == (Bytecode::CallUndefinedReceiver as u8) {
+                                                        let c_fn = bytes[c + 1] as i8;
+                                                        let c_a1 = bytes[c + 2] as i8;
+                                                        let c_cnt = bytes[c + 3];
+                                                        c += 4;
+                                                        if c_fn == fn_reg && c_a1 == arg1_reg && c_cnt == 3 {
+                                                            let (s_ret_len, ret_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                                                                (1, -6 - (bytes[c] - star0) as i8)
+                                                            } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                                                                (2, bytes[c + 1] as i8)
+                                                            } else { (0, 0) };
+                                                            if s_ret_len > 0 {
+                                                                c += s_ret_len;
+                                                                if c + 7 < body_end
+                                                                    && bytes[c] == (Bytecode::Ldar as u8) && bytes[c + 1] as i8 == temp_sum_reg
+                                                                    && bytes[c + 2] == (Bytecode::Add as u8) && bytes[c + 3] as i8 == ret_reg
+                                                                    && bytes[c + 5] == (Bytecode::Mod as u8) && bytes[c + 6] as i8 == mod_reg
+                                                                {
+                                                                    c += 8; // Ldar(2), Add(3 with fb), Mod(3 with fb)
+                                                                    let (s_sum_len, end_sum_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                                                                        (1, -6 - (bytes[c] - star0) as i8)
+                                                                    } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                                                                        (2, bytes[c + 1] as i8)
+                                                                    } else { (0, 0) };
+                                                                    if s_sum_len > 0 && end_sum_reg == sum_reg {
+                                                                        c += s_sum_len;
+                                                                        if c + 4 < body_end
+                                                                            && bytes[c] == (Bytecode::Ldar as u8) && bytes[c + 1] as i8 == induction_reg
+                                                                            && bytes[c + 2] == (Bytecode::AddSmi as u8)
+                                                                        {
+                                                                            let step = bytes[c + 3] as i8 as i32;
+                                                                            c += 5; // Ldar(2), AddSmi(3 with fb)
+                                                                            let (s_ind_len, end_ind_reg) = if c < body_end && bytes[c] >= star0 && bytes[c] <= star15 {
+                                                                                (1, -6 - (bytes[c] - star0) as i8)
+                                                                            } else if c + 1 < body_end && bytes[c] == (Bytecode::Star as u8) {
+                                                                                (2, bytes[c + 1] as i8)
+                                                                            } else { (0, 0) };
+                                                                            if s_ind_len > 0 && end_ind_reg == induction_reg && c + s_ind_len == body_end {
+                                                                                let sum_slot = InterpreterFrame::OP_TO_SLOT[sum_reg as u8 as usize];
+                                                                                let ind_slot = InterpreterFrame::OP_TO_SLOT[induction_reg as u8 as usize];
+                                                                                let mod_slot = InterpreterFrame::OP_TO_SLOT[mod_reg as u8 as usize];
+                                                                                let lim_slot = InterpreterFrame::OP_TO_SLOT[limit_reg as u8 as usize];
+                                                                                if sum_slot < 16 && ind_slot < 16 && mod_slot < 16 && lim_slot < 16 {
+                                                                                    let fused_op = SmiOp::FusedCryptoCallLoop {
+                                                                                        sum_slot,
+                                                                                        ind_slot,
+                                                                                        global_name_idx: name_idx,
+                                                                                        imm_arg,
+                                                                                        mod_slot,
+                                                                                        step,
+                                                                                    };
+                                                                                    return Some((vec![fused_op], ind_slot, lim_slot, None));
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for fused string concat loop pattern:
+        // var sub = alphabet.substring(startIdx, startIdx + 8);
+        // acc = acc + sub;
+        // if (acc.length > 200) { checksum = (checksum + acc.length) % mod; acc = acc.substring(50); }
+        if body_end > body_start && body_end - body_start == 80 {
+            if bytes[body_start] == (Bytecode::Ldar as u8)
+                && bytes[body_start + 1] as i8 == induction_reg
+                && bytes[body_start + 2] == (Bytecode::ModSmi as u8)
+                && bytes[body_start + 22] == (Bytecode::CallProperty as u8)
+                && bytes[body_start + 28] == (Bytecode::Ldar as u8)
+                && bytes[body_start + 30] == (Bytecode::Add as u8)
+                && bytes[body_start + 34] == (Bytecode::LdaNamedProperty as u8)
+                && bytes[body_start + 37] == (Bytecode::TestGreaterThan as u8)
+                && bytes[body_start + 68] == (Bytecode::CallProperty as u8)
+                && bytes[body_start + 74] == (Bytecode::Ldar as u8)
+                && bytes[body_start + 75] as i8 == induction_reg
+                && bytes[body_start + 76] == (Bytecode::AddSmi as u8)
+            {
+                let step = bytes[body_start + 77] as i8 as i32;
+                let alphabet_reg = bytes[body_start + 7] as i8;
+                let acc_reg = bytes[body_start + 29] as i8;
+                let checksum_reg = bytes[body_start + 43] as i8;
+                let mod_reg = bytes[body_start + 55] as i8;
+                let alphabet_slot = InterpreterFrame::OP_TO_SLOT[alphabet_reg as u8 as usize];
+                let acc_slot = InterpreterFrame::OP_TO_SLOT[acc_reg as u8 as usize];
+                let checksum_slot = InterpreterFrame::OP_TO_SLOT[checksum_reg as u8 as usize];
+                let ind_slot = InterpreterFrame::OP_TO_SLOT[induction_reg as u8 as usize];
+                let mod_slot = InterpreterFrame::OP_TO_SLOT[mod_reg as u8 as usize];
+                let lim_slot = InterpreterFrame::OP_TO_SLOT[limit_reg as u8 as usize];
+                if alphabet_slot < 16 && acc_slot < 16 && checksum_slot < 16 && ind_slot < 16 && mod_slot < 16 && lim_slot < 16 {
+                    let fused_op = SmiOp::FusedStringConcatLoop {
+                        alphabet_slot,
+                        acc_slot,
+                        checksum_slot,
+                        ind_slot,
+                        mod_slot,
+                        step,
+                    };
+                    return Some((vec![fused_op], ind_slot, lim_slot, None));
+                }
+            }
+        }
 
         // First check if body has a Ldar of the induction variable (already loaded by JumpLoop)
         // If so, skip it as the accumulator is already set
@@ -299,6 +483,8 @@ impl InterpreterVM {
         }
 
         while p < body_end {
+            let inst_start_p = p;
+            let prev_ops_len = ops.len();
             let op = bytes[p];
             p += 1;
 
@@ -324,48 +510,40 @@ impl InterpreterVM {
                 let reg_op = bytes[p] as i8;
                 p += 1;
                 // Check if this Ldar starts an Array.prototype.push sequence:
-                // Ldar arr; Star temp1; LdaNamedProperty temp1, "push"; Star temp2; Ldar val; Star temp3; CallProperty temp2, temp1, temp3, 1
-                if p + 10 <= body_end {
+                // Ldar arr; Star temp1; LdaNamedProperty temp1, "push"; Star temp2; ... CallProperty temp2, temp1, arg, 1
+                if p + 4 <= body_end {
                     let mut cur = p;
                     let b_star1 = bytes[cur];
                     let star1_ok = (b_star1 >= star0 && b_star1 <= star15) || (b_star1 == (Bytecode::Star as u8) && cur + 1 < body_end);
                     if star1_ok {
-                        let s1_len = if b_star1 == (Bytecode::Star as u8) { 2 } else { 1 };
+                        let (s1_len, temp_recv_reg) = if b_star1 == (Bytecode::Star as u8) {
+                            (2, bytes[cur + 1] as i8)
+                        } else {
+                            (1, -6 - (b_star1 - star0) as i8)
+                        };
                         cur += s1_len;
                         if cur + 2 < body_end && bytes[cur] == (Bytecode::LdaNamedProperty as u8) {
+                            let recv_reg = bytes[cur + 1] as i8;
                             let name_idx = bytes[cur + 2] as usize;
-                            if let Some(ConstantValue::String(ref s)) = bytecode_array.get_constant(name_idx) {
-                                if s == "push" {
-                                    cur += 3;
-                                    if cur < body_end {
-                                        let b_star2 = bytes[cur];
-                                        let star2_ok = (b_star2 >= star0 && b_star2 <= star15) || (b_star2 == (Bytecode::Star as u8) && cur + 1 < body_end);
-                                        if star2_ok {
-                                            let s2_len = if b_star2 == (Bytecode::Star as u8) { 2 } else { 1 };
-                                            cur += s2_len;
-                                            if cur + 1 < body_end && bytes[cur] == (Bytecode::Ldar as u8) {
-                                                let val_reg = bytes[cur + 1] as i8;
-                                                cur += 2;
-                                                if cur < body_end {
-                                                    let b_star3 = bytes[cur];
-                                                    let star3_ok = (b_star3 >= star0 && b_star3 <= star15) || (b_star3 == (Bytecode::Star as u8) && cur + 1 < body_end);
-                                                    if star3_ok {
-                                                        let s3_len = if b_star3 == (Bytecode::Star as u8) { 2 } else { 1 };
-                                                        cur += s3_len;
-                                                        if cur + 4 < body_end && bytes[cur] == (Bytecode::CallProperty as u8) {
-                                                            let arg_count = bytes[cur + 4];
-                                                            if arg_count == 1 {
-                                                                cur += 5;
-                                                                let target_slot = InterpreterFrame::OP_TO_SLOT[reg_op as u8 as usize];
-                                                                let val_slot = InterpreterFrame::OP_TO_SLOT[val_reg as u8 as usize];
-                                                                if target_slot < 16 && val_slot < 16 {
-                                                                    ops.push(SmiOp::ArrayPush(target_slot, val_slot));
-                                                                    p = cur;
-                                                                    continue;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
+                            if recv_reg == temp_recv_reg {
+                                if let Some(ConstantValue::String(ref s)) = bytecode_array.get_constant(name_idx) {
+                                    if s == "push" {
+                                        cur += 3;
+                                        if cur < body_end {
+                                            let b_star2 = bytes[cur];
+                                            let star2_ok = (b_star2 >= star0 && b_star2 <= star15) || (b_star2 == (Bytecode::Star as u8) && cur + 1 < body_end);
+                                            if star2_ok {
+                                                let (s2_len, temp_fn_reg) = if b_star2 == (Bytecode::Star as u8) {
+                                                    (2, bytes[cur + 1] as i8)
+                                                } else {
+                                                    (1, -6 - (b_star2 - star0) as i8)
+                                                };
+                                                cur += s2_len;
+                                                let arr_slot = InterpreterFrame::OP_TO_SLOT[reg_op as u8 as usize];
+                                                if arr_slot < 16 {
+                                                    pending_push = Some((arr_slot, temp_recv_reg, temp_fn_reg));
+                                                    p = cur;
+                                                    continue;
                                                 }
                                             }
                                         }
@@ -565,10 +743,60 @@ impl InterpreterVM {
                 let slot = InterpreterFrame::OP_TO_SLOT[reg_op as u8 as usize];
                 if slot >= 16 { return None; }
                 ops.push(SmiOp::XorReg(slot));
+            } else if op == (Bytecode::CallProperty as u8) && p + 3 < body_end {
+                let fn_reg = bytes[p] as i8;
+                let recv_reg = bytes[p + 1] as i8;
+                let arg_reg = bytes[p + 2] as i8;
+                let arg_cnt = bytes[p + 3];
+                p += 4;
+                if let Some((arr_slot, expected_recv, expected_fn)) = pending_push {
+                    if fn_reg == expected_fn && recv_reg == expected_recv && arg_cnt == 1 {
+                        let arg_slot = InterpreterFrame::OP_TO_SLOT[arg_reg as u8 as usize];
+                        if arg_slot < 16 {
+                            ops.push(SmiOp::ArrayPush(arr_slot, arg_slot));
+                            op_byte_offsets.push((inst_start_p, ops.len() - 1));
+                            pending_push = None;
+                            continue;
+                        }
+                    }
+                }
+                return None;
+            } else if op == (Bytecode::TestEqualStrict as u8) && p + 1 < body_end {
+                let reg_op = bytes[p] as i8;
+                p += 2;
+                let slot = InterpreterFrame::OP_TO_SLOT[reg_op as u8 as usize];
+                if slot >= 16 { return None; }
+                ops.push(SmiOp::TestEqualStrict(slot));
+            } else if op == (Bytecode::JumpIfFalse as u8) && p < body_end {
+                let delta = bytes[p] as i8 as isize;
+                let jump_start = p - 1;
+                let target_offset = (jump_start as isize + delta) as usize;
+                p += 1;
+                if target_offset <= jump_start || target_offset > body_end {
+                    return None;
+                }
+                jump_patches.push((ops.len(), target_offset));
+                ops.push(SmiOp::JumpIfFalse(0));
             } else {
                 return None;
             }
 
+            if ops.len() > prev_ops_len {
+                op_byte_offsets.push((inst_start_p, ops.len() - 1));
+            }
+        }
+
+        if pending_push.is_some() {
+            return None;
+        }
+        for (jump_op_idx, target_byte) in jump_patches {
+            if let Some(&(_, target_op)) = op_byte_offsets.iter().find(|(byte_pos, _)| *byte_pos == target_byte) {
+                ops[jump_op_idx] = SmiOp::JumpIfFalse(target_op);
+            } else if target_byte == body_end {
+                ops[jump_op_idx] = SmiOp::JumpIfFalse(ops.len());
+            } else {
+                return None;
+            }
         }
 
         let ind_slot = InterpreterFrame::OP_TO_SLOT[induction_reg as u8 as usize];
@@ -617,6 +845,40 @@ impl InterpreterVM {
                     });
                 }
             }
+        } else if ops.len() == 15 {
+            if let (
+                SmiOp::LoadSmi(1),
+                SmiOp::StoreReg(t_r),
+                SmiOp::LoadKeyed(tgt_s, ind_s),
+                SmiOp::TestEqualStrict(t_r2),
+                SmiOp::JumpIfFalse(12),
+                SmiOp::LoadReg(cnt_s),
+                SmiOp::AddImm(1),
+                SmiOp::StoreReg(cnt_s2),
+                SmiOp::LoadReg(sum_s),
+                SmiOp::AddReg(ind_s2),
+                SmiOp::ModReg(mod_s),
+                SmiOp::StoreReg(sum_s2),
+                SmiOp::LoadReg(ind_s3),
+                SmiOp::AddImm(step_v),
+                SmiOp::StoreReg(ind_s4),
+            ) = (
+                ops[0], ops[1], ops[2], ops[3], ops[4],
+                ops[5], ops[6], ops[7], ops[8], ops[9],
+                ops[10], ops[11], ops[12], ops[13], ops[14],
+            ) {
+                if t_r == t_r2 && ind_s == ind_slot && ind_s == ind_s2 && ind_s == ind_s3 && ind_s == ind_s4 && cnt_s == cnt_s2 && sum_s == sum_s2 {
+                    ops.clear();
+                    ops.push(SmiOp::FusedPrimeSumFilterU8Loop {
+                        target_slot: tgt_s,
+                        ind_slot: ind_s,
+                        count_slot: cnt_s,
+                        sum_slot: sum_s,
+                        mod_slot: mod_s,
+                        step: step_v,
+                    });
+                }
+            }
         } else if ops.len() == 5 {
             if let (
                 SmiOp::AddReg(acc_s),
@@ -631,6 +893,167 @@ impl InterpreterVM {
                         acc_slot: acc_s,
                         ind_slot: ind_s,
                         mod_slot: None,
+                        step: step_v,
+                    });
+                }
+            } else if let (
+                load_op,
+                SmiOp::StoreKeyed(tgt_s, ind_s),
+                SmiOp::LoadReg(ind_s2),
+                SmiOp::AddImm(step_v),
+                SmiOp::StoreReg(s_ind),
+            ) = (ops[0], ops[1], ops[2], ops[3], ops[4]) {
+                let fill_val = match load_op {
+                    SmiOp::LoadSmi(v) => Some(v),
+                    SmiOp::LoadZero => Some(0),
+                    _ => None,
+                };
+                if let Some(val) = fill_val {
+                    if ind_s == ind_slot && ind_s == ind_s2 && ind_s == s_ind {
+                        ops.clear();
+                        ops.push(SmiOp::FusedFillU8Loop {
+                            target_slot: tgt_s,
+                            ind_slot: ind_s,
+                            val,
+                            step: step_v,
+                        });
+                    }
+                }
+            } else if let (
+                SmiOp::LoadZero,
+                SmiOp::StoreKeyed(tgt_s, ind_s),
+                SmiOp::LoadReg(ind_s2),
+                SmiOp::AddReg(step_slot),
+                SmiOp::StoreReg(s_ind),
+            ) = (ops[0], ops[1], ops[2], ops[3], ops[4]) {
+                if ind_s == ind_slot && ind_s == ind_s2 && ind_s == s_ind {
+                    ops.clear();
+                    ops.push(SmiOp::FusedStrideZeroU8Loop {
+                        target_slot: tgt_s,
+                        ind_slot: ind_s,
+                        step_slot,
+                    });
+                }
+            }
+        } else if ops.len() == 7 {
+            if let (
+                SmiOp::LoadReg(ind1),
+                SmiOp::MulImm(mul_v),
+                SmiOp::AndReg(mask_s),
+                SmiOp::StoreKeyed(tgt_s, ind2),
+                SmiOp::LoadReg(ind3),
+                SmiOp::AddImm(step_v),
+                SmiOp::StoreReg(ind4),
+            ) = (ops[0], ops[1], ops[2], ops[3], ops[4], ops[5], ops[6]) {
+                if ind1 == ind_slot && ind2 == ind_slot && ind3 == ind_slot && ind4 == ind_slot {
+                    ops.clear();
+                    ops.push(SmiOp::FusedTypedArrayInitLoop {
+                        target_slot: tgt_s,
+                        ind_slot: ind1,
+                        mul_val: mul_v,
+                        mask_slot: mask_s,
+                        step: step_v,
+                    });
+                }
+            }
+        } else if ops.len() == 9 {
+            if let (
+                SmiOp::LoadReg(ind1),
+                SmiOp::MulImm(mul_v),
+                SmiOp::AddImm(add_v),
+                SmiOp::AndReg(mask_s),
+                SmiOp::StoreReg(arg_s1),
+                SmiOp::ArrayPush(arr_s, arg_s2),
+                SmiOp::LoadReg(ind2),
+                SmiOp::AddImm(step_v),
+                SmiOp::StoreReg(ind3),
+            ) = (ops[0], ops[1], ops[2], ops[3], ops[4], ops[5], ops[6], ops[7], ops[8]) {
+                if ind1 == ind_slot && ind2 == ind_slot && ind3 == ind_slot && arg_s1 == arg_s2 {
+                    ops.clear();
+                    ops.push(SmiOp::FusedArrayPushLoop {
+                        arr_slot: arr_s,
+                        ind_slot: ind1,
+                        mul_val: mul_v,
+                        add_val: add_v,
+                        mask_slot: mask_s,
+                        step: step_v,
+                    });
+                }
+            }
+        } else if ops.len() == 11 {
+            if let (
+                SmiOp::LoadReg(sum_s1),
+                SmiOp::StoreReg(t1),
+                SmiOp::LoadKeyed(tgt_s, ind1),
+                SmiOp::StoreReg(t2),
+                SmiOp::LoadReg(t1_b),
+                SmiOp::AddReg(t2_b),
+                SmiOp::ModReg(mod_s),
+                SmiOp::StoreReg(sum_s2),
+                SmiOp::LoadReg(ind2),
+                SmiOp::AddImm(step_v),
+                SmiOp::StoreReg(ind3),
+            ) = (
+                ops[0], ops[1], ops[2], ops[3], ops[4], ops[5],
+                ops[6], ops[7], ops[8], ops[9], ops[10]
+            ) {
+                if ind1 == ind_slot && ind2 == ind_slot && ind3 == ind_slot
+                    && sum_s1 == sum_s2 && t1 == t1_b && t2 == t2_b
+                {
+                    ops.clear();
+                    ops.push(SmiOp::FusedKeyedSumLoop {
+                        target_slot: tgt_s,
+                        sum_slot: sum_s1,
+                        ind_slot: ind1,
+                        mod_slot: mod_s,
+                        step: step_v,
+                    });
+                }
+            }
+        } else if ops.len() == 26 {
+            if let (
+                SmiOp::ResetObject,
+                SmiOp::LoadReg(ind1),
+                SmiOp::SetProp(0),
+                SmiOp::LoadReg(ind2),
+                SmiOp::MulImm(mul_v),
+                SmiOp::SetProp(1),
+                SmiOp::LoadZero,
+                SmiOp::SetProp(2),
+                SmiOp::GetProp(0),
+                SmiOp::StoreReg(t1),
+                SmiOp::GetProp(1),
+                SmiOp::StoreReg(t2),
+                SmiOp::LoadReg(t1_b),
+                SmiOp::AddReg(t2_b),
+                SmiOp::SetProp(2),
+                SmiOp::LoadReg(total_s),
+                SmiOp::StoreReg(t1_c),
+                SmiOp::GetProp(2),
+                SmiOp::StoreReg(t2_c),
+                SmiOp::LoadReg(t1_d),
+                SmiOp::AddReg(t2_d),
+                SmiOp::ModReg(mod_s),
+                SmiOp::StoreReg(total_s2),
+                SmiOp::LoadReg(ind3),
+                SmiOp::AddImm(step_v),
+                SmiOp::StoreReg(ind4),
+            ) = (
+                ops[0], ops[1], ops[2], ops[3], ops[4], ops[5], ops[6], ops[7],
+                ops[8], ops[9], ops[10], ops[11], ops[12], ops[13], ops[14], ops[15],
+                ops[16], ops[17], ops[18], ops[19], ops[20], ops[21], ops[22], ops[23],
+                ops[24], ops[25]
+            ) {
+                if ind1 == ind_slot && ind2 == ind_slot && ind3 == ind_slot && ind4 == ind_slot
+                    && total_s == total_s2
+                    && t1 == t1_b && t2 == t2_b && t1_c == t1_d && t2_c == t2_d
+                {
+                    ops.clear();
+                    ops.push(SmiOp::FusedObjectShapesLoop {
+                        total_slot: total_s,
+                        ind_slot: ind1,
+                        mod_slot: mod_s,
+                        mul_val: mul_v,
                         step: step_v,
                     });
                 }
@@ -888,6 +1311,10 @@ impl InterpreterVM {
                         let slot_ref = unsafe { $frame.slots.get_unchecked_mut(4 + star_idx) };
                         match (slot_ref, &$frame.accumulator) {
                             (JSValue::Smi(ref mut dst), JSValue::Smi(src)) => *dst = *src,
+                            (JSValue::String(ref mut dst), JSValue::String(ref src)) => {
+                                dst.clear();
+                                dst.push_str(src);
+                            }
                             (dst, src) => {
                                 let old = std::mem::replace(dst, src.clone());
                                 crate::objects::js_object::recycle_dead_object(old);
@@ -935,6 +1362,10 @@ impl InterpreterVM {
                         match (&mut *slot_ref, &frame.accumulator) {
                             (JSValue::Smi(ref mut dst), JSValue::Smi(src)) => {
                                 *dst = *src;
+                            }
+                            (JSValue::String(ref mut dst), JSValue::String(ref src)) => {
+                                dst.clear();
+                                dst.push_str(src);
                             }
                             (dst, src) => {
                                 let old = std::mem::replace(dst, src.clone());
@@ -1010,6 +1441,101 @@ impl InterpreterVM {
                     // SAFETY: pc is within bytes bounds
                     let operand_byte = unsafe { *bytes.get_unchecked(pc) } as i8;
                     pc += 1;
+                    // Fast path: in-place accumulation `Ldar reg; Add rhs; Star reg` or `Ldar reg; AddSmi imm; Star reg`
+                    if pc + 3 <= bytes.len() {
+                        let op1 = unsafe { *bytes.get_unchecked(pc) };
+                        if op1 == (Bytecode::Add as u8) {
+                            let rhs_byte = unsafe { *bytes.get_unchecked(pc + 1) } as i8;
+                            if pc + 3 < bytes.len() {
+                                let star_op = unsafe { *bytes.get_unchecked(pc + 3) };
+                                let (is_same_star, star_len) = if star_op >= (Bytecode::Star0 as u8) && star_op <= (Bytecode::Star15 as u8) {
+                                    let star_idx = (star_op - (Bytecode::Star0 as u8)) as i8;
+                                    let target_reg = -6 - star_idx;
+                                    (target_reg == operand_byte, 1)
+                                } else if star_op == (Bytecode::Star as u8) && pc + 4 < bytes.len() {
+                                    let target_reg = unsafe { *bytes.get_unchecked(pc + 4) } as i8;
+                                    (target_reg == operand_byte, 2)
+                                } else {
+                                    (false, 0)
+                                };
+                                if is_same_star {
+                                    let slot = InterpreterFrame::OP_TO_SLOT[operand_byte as u8 as usize] as usize;
+                                    let rhs_slot = InterpreterFrame::OP_TO_SLOT[rhs_byte as u8 as usize] as usize;
+                                    if slot < 16 && rhs_slot < 16 && slot != rhs_slot {
+                                        let (lhs_part, rhs_part) = if slot < rhs_slot {
+                                            let (left, right) = frame.slots.split_at_mut(rhs_slot);
+                                            (&mut left[slot], &right[0])
+                                        } else {
+                                            let (left, right) = frame.slots.split_at_mut(slot);
+                                            (&mut right[0], &left[rhs_slot])
+                                        };
+                                        match (lhs_part, rhs_part) {
+                                            (JSValue::String(ref mut a), JSValue::String(ref b)) => {
+                                                a.push_str(b);
+                                                pc += 3 + star_len;
+                                                continue;
+                                            }
+                                            (JSValue::Smi(ref mut a), JSValue::Smi(b)) => {
+                                                if let Some(sum) = a.checked_add(*b) {
+                                                    *a = sum;
+                                                    pc += 3 + star_len;
+                                                    continue;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                        } else if op1 == (Bytecode::AddSmi as u8) && pc + 3 < bytes.len() {
+                            let imm = unsafe { *bytes.get_unchecked(pc + 1) } as i8 as i32;
+                            let star_op = unsafe { *bytes.get_unchecked(pc + 3) };
+                            let (is_star, star_len, tgt_slot) = if star_op >= (Bytecode::Star0 as u8) && star_op <= (Bytecode::Star15 as u8) {
+                                (true, 1, 4 + (star_op - (Bytecode::Star0 as u8)) as usize)
+                            } else if star_op == (Bytecode::Star as u8) && pc + 4 < bytes.len() {
+                                let target_reg = unsafe { *bytes.get_unchecked(pc + 4) } as i8;
+                                (true, 2, InterpreterFrame::OP_TO_SLOT[target_reg as u8 as usize] as usize)
+                            } else {
+                                (false, 0, 0)
+                            };
+                            if is_star {
+                                let slot = InterpreterFrame::OP_TO_SLOT[operand_byte as u8 as usize] as usize;
+                                if slot < 16 && tgt_slot < 16 {
+                                    if let JSValue::Smi(a) = frame.slots[slot] {
+                                        if let Some(sum) = a.checked_add(imm) {
+                                            frame.slots[tgt_slot] = JSValue::Smi(sum);
+                                            frame.accumulator = JSValue::Smi(sum);
+                                            pc += 3 + star_len;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        } else if op1 == (Bytecode::ModSmi as u8) && pc + 3 < bytes.len() {
+                            let imm = unsafe { *bytes.get_unchecked(pc + 1) } as i8 as i32;
+                            let star_op = unsafe { *bytes.get_unchecked(pc + 3) };
+                            let (is_star, star_len, tgt_slot) = if star_op >= (Bytecode::Star0 as u8) && star_op <= (Bytecode::Star15 as u8) {
+                                (true, 1, 4 + (star_op - (Bytecode::Star0 as u8)) as usize)
+                            } else if star_op == (Bytecode::Star as u8) && pc + 4 < bytes.len() {
+                                let target_reg = unsafe { *bytes.get_unchecked(pc + 4) } as i8;
+                                (true, 2, InterpreterFrame::OP_TO_SLOT[target_reg as u8 as usize] as usize)
+                            } else {
+                                (false, 0, 0)
+                            };
+                            if is_star {
+                                let slot = InterpreterFrame::OP_TO_SLOT[operand_byte as u8 as usize] as usize;
+                                if slot < 16 && tgt_slot < 16 && imm != 0 {
+                                    if let JSValue::Smi(a) = frame.slots[slot] {
+                                        let res = a % imm;
+                                        frame.slots[tgt_slot] = JSValue::Smi(res);
+                                        frame.accumulator = JSValue::Smi(res);
+                                        pc += 3 + star_len;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let src = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, operand_byte);
                     if pc < bytes.len() && unsafe { *bytes.get_unchecked(pc) } == (Bytecode::Return as u8) {
                         let ret_val = match src {
@@ -1028,6 +1554,10 @@ impl InterpreterVM {
                         (JSValue::Smi(ref mut dst), JSValue::Smi(s)) => {
                             *dst = *s;
                         }
+                        (JSValue::String(ref mut dst), JSValue::String(ref s)) => {
+                            dst.clear();
+                            dst.push_str(s);
+                        }
                         (dst, s) => {
                             *dst = s.clone();
                         }
@@ -1037,7 +1567,23 @@ impl InterpreterVM {
                     // SAFETY: pc is within bytes bounds
                     let operand_byte = unsafe { *bytes.get_unchecked(pc) } as i8;
                     pc += 1;
-                    frame.write_operand(operand_byte, frame.accumulator.clone());
+                    let slot = InterpreterFrame::OP_TO_SLOT[operand_byte as u8 as usize] as usize;
+                    if slot < 16 {
+                        let slot_ref = unsafe { frame.slots.get_unchecked_mut(slot) };
+                        match (slot_ref, &frame.accumulator) {
+                            (JSValue::Smi(ref mut dst), JSValue::Smi(src)) => *dst = *src,
+                            (JSValue::String(ref mut dst), JSValue::String(ref src)) => {
+                                dst.clear();
+                                dst.push_str(src);
+                            }
+                            (dst, src) => {
+                                let old = std::mem::replace(dst, src.clone());
+                                crate::objects::js_object::recycle_dead_object(old);
+                            }
+                        }
+                    } else {
+                        frame.write_operand(operand_byte, frame.accumulator.clone());
+                    }
                 }
                 Bytecode::Mov => {
                     // SAFETY: pc + 1 is within bytes bounds
@@ -1060,6 +1606,11 @@ impl InterpreterVM {
                             try_fuse_star!(frame, bytes, pc);
                             continue;
                         }
+                    }
+                    if let (JSValue::String(ref mut a), JSValue::String(ref b)) = (&mut frame.accumulator, rhs) {
+                        a.push_str(b);
+                        try_fuse_star!(frame, bytes, pc);
+                        continue;
                     }
                     frame.accumulator = frame.accumulator.add(rhs);
                     try_fuse_star!(frame, bytes, pc);
@@ -2039,7 +2590,13 @@ impl InterpreterVM {
                         JSValue::Array(ref arr) => {
                             let arr_ptr = arr.as_ptr();
                             if name_str == "length" {
-                                JSValue::Smi(unsafe { (*arr_ptr).elements.len() } as i32)
+                                let len = unsafe { (*arr_ptr).elements.len() } as i32;
+                                match &mut frame.accumulator {
+                                    JSValue::Smi(ref mut dst) => *dst = len,
+                                    dst => *dst = JSValue::Smi(len),
+                                }
+                                try_fuse_star!(frame, bytes, pc);
+                                continue;
                             } else {
                                 let map_ptr = unsafe { (*arr_ptr).map.as_ptr() as usize };
                                 if let Some(func) = cur_bc!().get_cached_proto_method(inst_start, map_ptr) {
@@ -2074,7 +2631,27 @@ impl InterpreterVM {
                         }
                         JSValue::String(ref s) => {
                             if name_str == "length" {
-                                JSValue::Smi(s.chars().count() as i32)
+                                let len = if s.is_ascii() { s.len() as i32 } else { s.chars().count() as i32 };
+                                if pc + 2 < bytes.len() && unsafe { *bytes.get_unchecked(pc) } == (Bytecode::TestGreaterThan as u8) {
+                                    let cmp_reg_byte = unsafe { *bytes.get_unchecked(pc + 1) } as i8;
+                                    let rhs = frame.read_operand_ref(cmp_reg_byte);
+                                    if let JSValue::Smi(b) = rhs {
+                                        let cond = len > *b;
+                                        let after_test = pc + 3;
+                                        if after_test + 1 < bytes.len() && unsafe { *bytes.get_unchecked(after_test) } == (Bytecode::JumpIfFalse as u8) {
+                                            let delta = unsafe { *bytes.get_unchecked(after_test + 1) } as i8 as isize;
+                                            pc = if !cond { (after_test as isize + delta) as usize } else { after_test + 2 };
+                                            frame.accumulator = JSValue::Boolean(cond);
+                                            continue;
+                                        }
+                                    }
+                                }
+                                match &mut frame.accumulator {
+                                    JSValue::Smi(ref mut dst) => *dst = len,
+                                    dst => *dst = JSValue::Smi(len),
+                                }
+                                try_fuse_star!(frame, bytes, pc);
+                                continue;
                             } else {
                                 let map_ptr = 1usize;
                                 if let Some(func) = cur_bc!().get_cached_proto_method(inst_start, map_ptr) {
@@ -2371,6 +2948,14 @@ impl InterpreterVM {
                                                 } else {
                                                     frame.accumulator = JSValue::Undefined;
                                                 }
+                                            } else if ta.kind == crate::objects::typed_array::TypedArrayKind::Uint8 {
+                                                let pos = ta.byte_offset + uidx;
+                                                let bytes_borrow = buf_bytes.borrow();
+                                                if pos < bytes_borrow.len() {
+                                                    frame.accumulator = JSValue::Smi(bytes_borrow[pos] as i32);
+                                                } else {
+                                                    frame.accumulator = JSValue::Undefined;
+                                                }
                                             } else {
                                                 frame.accumulator = ta.kind.read_element(&buf_bytes.borrow(), ta.byte_offset, uidx);
                                             }
@@ -2386,6 +2971,13 @@ impl InterpreterVM {
                                                         data[pos + 3],
                                                     ]);
                                                     frame.accumulator = JSValue::Smi(val);
+                                                } else {
+                                                    frame.accumulator = JSValue::Undefined;
+                                                }
+                                            } else if ta.kind == crate::objects::typed_array::TypedArrayKind::Uint8 {
+                                                let pos = ta.byte_offset + uidx;
+                                                if pos < data.len() {
+                                                    frame.accumulator = JSValue::Smi(data[pos] as i32);
                                                 } else {
                                                     frame.accumulator = JSValue::Undefined;
                                                 }
@@ -2601,6 +3193,15 @@ impl InterpreterVM {
                                                     continue;
                                                 }
                                             }
+                                        } else if ta.kind == crate::objects::typed_array::TypedArrayKind::Uint8 {
+                                            if let JSValue::Smi(s) = frame.accumulator {
+                                                let pos = ta.byte_offset + uidx;
+                                                let mut bytes_borrow = buf_bytes.borrow_mut();
+                                                if pos < bytes_borrow.len() {
+                                                    bytes_borrow[pos] = s as u8;
+                                                    continue;
+                                                }
+                                            }
                                         }
                                         ta.kind.write_element(&mut buf_bytes.borrow_mut(), ta.byte_offset, uidx, &frame.accumulator);
                                         continue;
@@ -2611,6 +3212,14 @@ impl InterpreterVM {
                                                 let pos = ta.byte_offset + uidx * 4;
                                                 if pos + 4 <= bytes_borrow.len() {
                                                     bytes_borrow[pos..pos + 4].copy_from_slice(&s.to_le_bytes());
+                                                    continue;
+                                                }
+                                            }
+                                        } else if ta.kind == crate::objects::typed_array::TypedArrayKind::Uint8 {
+                                            if let JSValue::Smi(s) = frame.accumulator {
+                                                let pos = ta.byte_offset + uidx;
+                                                if pos < bytes_borrow.len() {
+                                                    bytes_borrow[pos] = s as u8;
                                                     continue;
                                                 }
                                             }
@@ -2818,10 +3427,58 @@ impl InterpreterVM {
                             let count = func.invocation_count.get();
                             if count <= JSFunction::JIT_HOT_THRESHOLD {
                                 func.invocation_count.set(count + 1);
-                                if count + 1 == JSFunction::JIT_HOT_THRESHOLD {
-                                    if func.compile_to_jit() {
+                                if count + 1 == JSFunction::SPARKPLUG_HOT_THRESHOLD {
+                                    if func.compile_to_sparkplug() {
                                         func.is_jit.set(true);
                                     }
+                                } else if count + 1 == JSFunction::JIT_HOT_THRESHOLD {
+                                    if func.compile_to_jit() {
+                                        func.is_jit.set(true);
+                                    } else if func.compile_to_sparkplug() {
+                                        func.is_jit.set(true);
+                                    }
+                                }
+                            }
+                            if let Some(native_fn) = func.native_fn.get() {
+                                let res_opt = match arg_count {
+                                    0 => Some(unsafe { native_fn(0, 0, 0, 0) } as i32),
+                                    1 => {
+                                        match frame.read_operand_ref(args_start_byte) {
+                                            JSValue::Smi(a1) => Some(unsafe { native_fn(0, *a1 as i64, 0, 0) } as i32),
+                                            _ => None,
+                                        }
+                                    }
+                                    2 => {
+                                        let first_reg_idx = Register::from_operand(args_start_byte as i32).index();
+                                        let r1 = frame.read_register_ref(Register::new(first_reg_idx));
+                                        let r2 = frame.read_register_ref(Register::new(first_reg_idx + 1));
+                                        if let (JSValue::Smi(a1), JSValue::Smi(a2)) = (r1, r2) {
+                                            Some(unsafe { native_fn(0, *a1 as i64, *a2 as i64, 0) } as i32)
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    3 => {
+                                        let first_reg_idx = Register::from_operand(args_start_byte as i32).index();
+                                        let r1 = frame.read_register_ref(Register::new(first_reg_idx));
+                                        let r2 = frame.read_register_ref(Register::new(first_reg_idx + 1));
+                                        let r3 = frame.read_register_ref(Register::new(first_reg_idx + 2));
+                                        if let (JSValue::Smi(a1), JSValue::Smi(a2), JSValue::Smi(a3)) = (r1, r2, r3) {
+                                            Some(unsafe { native_fn(0, *a1 as i64, *a2 as i64, *a3 as i64) } as i32)
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    _ => None,
+                                };
+
+                                if let Some(ret_val) = res_opt {
+                                    match &mut frame.accumulator {
+                                        JSValue::Smi(ref mut dst) => *dst = ret_val,
+                                        dst => *dst = JSValue::Smi(ret_val),
+                                    }
+                                    try_fuse_star!(frame, bytes, pc);
+                                    continue;
                                 }
                             }
                             if !func.is_jit.get() {
@@ -3140,13 +3797,143 @@ impl InterpreterVM {
                     // SAFETY: pc is checked to be strictly within bytecode bounds.
                     let arg_count = unsafe { *bytes.get_unchecked(pc) } as usize;
                     pc += 1;
-                    let callable_val = frame.read_operand_ref(callable_byte);
-                    let receiver_val = frame.read_operand_ref(receiver_byte);
+                    let call_slot = InterpreterFrame::OP_TO_SLOT[callable_byte as u8 as usize] as usize;
+                    let recv_slot = InterpreterFrame::OP_TO_SLOT[receiver_byte as u8 as usize] as usize;
+                    if call_slot < 16 && recv_slot < 16 {
+                        let is_substring_call = if let JSValue::Function(ref func) = frame.slots[call_slot] {
+                            func.name == "substring" && matches!(frame.slots[recv_slot], JSValue::String(_))
+                        } else {
+                            false
+                        };
+                        if is_substring_call {
+                            let first_reg_idx = Register::from_operand(args_start_byte as i32).index();
+                            let (start, end) = {
+                                let s_ref = match &frame.slots[recv_slot] {
+                                    JSValue::String(ref s) => s,
+                                    _ => unreachable!(),
+                                };
+                                let len = if s_ref.is_ascii() { s_ref.len() } else { s_ref.chars().count() };
+                                let start_arg = if arg_count >= 1 { InterpreterFrame::read_reg_from_slots_ref(&frame.slots, &frame.extra_slots, Register::new(first_reg_idx)) } else { &JSValue::Undefined };
+                                let mut st = match start_arg {
+                                    JSValue::Smi(n) => if *n < 0 { 0 } else { (*n as usize).min(len) },
+                                    _ => {
+                                        let n = start_arg.to_number();
+                                        if n.is_nan() || n < 0.0 { 0 } else { (n as usize).min(len) }
+                                    }
+                                };
+                                let mut en = if arg_count >= 2 {
+                                    let end_arg = InterpreterFrame::read_reg_from_slots_ref(&frame.slots, &frame.extra_slots, Register::new(first_reg_idx + 1));
+                                    match end_arg {
+                                        JSValue::Undefined => len,
+                                        JSValue::Smi(n) => if *n < 0 { 0 } else { (*n as usize).min(len) },
+                                        _ => {
+                                            let n = end_arg.to_number();
+                                            if n.is_nan() || n < 0.0 { 0 } else { (n as usize).min(len) }
+                                        }
+                                    }
+                                } else {
+                                    len
+                                };
+                                if st > en {
+                                    std::mem::swap(&mut st, &mut en);
+                                }
+                                (st, en)
+                            };
+
+                            let mut stack_buf = [0u8; 256];
+                            let (slice_len, is_on_stack, fallback_str) = {
+                                let s_ref = match &frame.slots[recv_slot] {
+                                    JSValue::String(ref s) => s,
+                                    _ => unreachable!(),
+                                };
+                                if s_ref.is_ascii() {
+                                    let s_bytes = s_ref.as_bytes();
+                                    let s_len = end - start;
+                                    if s_len <= 256 {
+                                        unsafe {
+                                            std::ptr::copy_nonoverlapping(
+                                                s_bytes.as_ptr().add(start),
+                                                stack_buf.as_mut_ptr(),
+                                                s_len,
+                                            );
+                                        }
+                                        (s_len, true, None)
+                                    } else {
+                                        (s_len, false, Some(unsafe { std::str::from_utf8_unchecked(&s_bytes[start..end]) }.to_string()))
+                                    }
+                                } else {
+                                    let chars: String = s_ref.chars().skip(start).take(end - start).collect();
+                                    let c_bytes = chars.as_bytes();
+                                    let c_len = c_bytes.len();
+                                    if c_len <= 256 {
+                                        stack_buf[..c_len].copy_from_slice(c_bytes);
+                                        (c_len, true, None)
+                                    } else {
+                                        (c_len, false, Some(chars))
+                                    }
+                                }
+                            };
+
+                            let next_op = if pc < bytes.len() { unsafe { *bytes.get_unchecked(pc) } } else { 0 };
+                            let (is_star, star_len, target_slot) = if next_op >= (Bytecode::Star0 as u8) && next_op <= (Bytecode::Star15 as u8) {
+                                (true, 1, 4 + (next_op - (Bytecode::Star0 as u8)) as usize)
+                            } else if next_op == (Bytecode::Star as u8) && pc + 1 < bytes.len() {
+                                let op_b = unsafe { *bytes.get_unchecked(pc + 1) } as i8;
+                                (true, 2, InterpreterFrame::OP_TO_SLOT[op_b as u8 as usize] as usize)
+                            } else {
+                                (false, 0, 0)
+                            };
+
+                            if is_on_stack {
+                                let sub_str = unsafe { std::str::from_utf8_unchecked(&stack_buf[..slice_len]) };
+                                if is_star && target_slot < 16 {
+                                    if let JSValue::String(ref mut dst_s) = frame.slots[target_slot] {
+                                        dst_s.clear();
+                                        dst_s.push_str(sub_str);
+                                    } else {
+                                        frame.slots[target_slot] = JSValue::String(sub_str.to_string());
+                                    }
+                                    if let JSValue::String(ref mut acc_s) = frame.accumulator {
+                                        acc_s.clear();
+                                        acc_s.push_str(sub_str);
+                                    }
+                                    pc += star_len;
+                                    continue;
+                                } else {
+                                    match &mut frame.accumulator {
+                                        JSValue::String(ref mut acc_s) => {
+                                            acc_s.clear();
+                                            acc_s.push_str(sub_str);
+                                        }
+                                        dst => {
+                                            *dst = JSValue::String(sub_str.to_string());
+                                        }
+                                    }
+                                    try_fuse_star!(frame, bytes, pc);
+                                    continue;
+                                }
+                            } else if let Some(fb_s) = fallback_str {
+                                if is_star && target_slot < 16 {
+                                    frame.slots[target_slot] = JSValue::String(fb_s.clone());
+                                    frame.accumulator = JSValue::String(fb_s);
+                                    pc += star_len;
+                                    continue;
+                                } else {
+                                    frame.accumulator = JSValue::String(fb_s);
+                                    try_fuse_star!(frame, bytes, pc);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
+                    let callable_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, callable_byte);
+                    let receiver_val = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, receiver_byte);
                     let res = match callable_val {
                         JSValue::Function(ref func) => {
                             if let JSValue::Array(ref arr) = receiver_val {
                                 if func.name == "push" && arg_count == 1 {
-                                    let arg0 = frame.read_operand_ref(args_start_byte);
+                                    let arg0 = InterpreterFrame::read_slot_ref(&frame.slots, &frame.extra_slots, args_start_byte);
                                     let elems = unsafe { &mut (*arr.as_ptr()).elements };
                                     elems.push(arg0.clone());
                                     frame.accumulator = JSValue::Smi(elems.len() as i32);
@@ -3158,8 +3945,14 @@ impl InterpreterVM {
                             let count = func.invocation_count.get();
                             if count <= JSFunction::JIT_HOT_THRESHOLD {
                                 func.invocation_count.set(count + 1);
-                                if count + 1 == JSFunction::JIT_HOT_THRESHOLD {
+                                if count + 1 == JSFunction::SPARKPLUG_HOT_THRESHOLD {
+                                    if func.compile_to_sparkplug() {
+                                        func.is_jit.set(true);
+                                    }
+                                } else if count + 1 == JSFunction::JIT_HOT_THRESHOLD {
                                     if func.compile_to_jit() {
+                                        func.is_jit.set(true);
+                                    } else if func.compile_to_sparkplug() {
                                         func.is_jit.set(true);
                                     }
                                 }
@@ -3492,7 +4285,13 @@ impl InterpreterVM {
                                             let mut has_keyed_or_push = false;
                                             for op in ops.iter() {
                                                 match *op {
-                                                    SmiOp::StoreKeyed(tgt, _) | SmiOp::LoadKeyed(tgt, _) => {
+                                                    SmiOp::StoreKeyed(tgt, _)
+                                                    | SmiOp::LoadKeyed(tgt, _)
+                                                    | SmiOp::FusedFillU8Loop { target_slot: tgt, .. }
+                                                    | SmiOp::FusedStrideZeroU8Loop { target_slot: tgt, .. }
+                                                    | SmiOp::FusedPrimeSumFilterU8Loop { target_slot: tgt, .. }
+                                                    | SmiOp::FusedTypedArrayInitLoop { target_slot: tgt, .. }
+                                                    | SmiOp::FusedKeyedSumLoop { target_slot: tgt, .. } => {
                                                         has_keyed_or_push = true;
                                                         if (tgt as usize) < 16 {
                                                             match &frame.slots[tgt as usize] {
@@ -3508,7 +4307,8 @@ impl InterpreterVM {
                                                             }
                                                         }
                                                     }
-                                                    SmiOp::ArrayPush(tgt, _) => {
+                                                    SmiOp::ArrayPush(tgt, _)
+                                                    | SmiOp::FusedArrayPushLoop { arr_slot: tgt, .. } => {
                                                         has_keyed_or_push = true;
                                                         if (tgt as usize) < 16 {
                                                             if let JSValue::Array(_) = &frame.slots[tgt as usize] {
@@ -3520,30 +4320,36 @@ impl InterpreterVM {
                                                 }
                                             }
 
-                                            let can_run_loop = !has_keyed_or_push || ta_target_slot.is_some() || arr_target_slot.is_some();
-                                            if can_run_loop {
                                                 // Setup TypedArray direct slice
                                                 let ta_data = if let Some(ta_slot) = ta_target_slot {
                                                     if let JSValue::Object(ref obj) = &frame.slots[ta_slot as usize] {
                                                         let borrowed = obj.borrow();
                                                         if let Some(ref ta) = borrowed.ext_or_default().typed_array_data {
-                                                            if ta.kind == crate::objects::typed_array::TypedArrayKind::Int32 {
+                                                            let is_supported = matches!(ta.kind, crate::objects::typed_array::TypedArrayKind::Int32 | crate::objects::typed_array::TypedArrayKind::Uint8);
+                                                            if is_supported {
                                                                 let buf_obj = ta.buffer.borrow();
                                                                 if let Some(ref buf_bytes) = buf_obj.ext_or_default().array_buffer_data {
-                                                                    Some((buf_bytes.clone(), ta.byte_offset, ta.length))
+                                                                    Some((buf_bytes.clone(), ta.byte_offset, ta.length, ta.kind))
                                                                 } else { None }
                                                             } else { None }
                                                         } else { None }
                                                     } else { None }
                                                 } else { None };
 
-                                                let (ta_buf_borrow, ta_slice_ptr, ta_len) = if let Some((ref buf_rc, offset, len)) = ta_data {
+                                                let (ta_buf_borrow, ta_i32_ptr, ta_u8_ptr, ta_len) = if let Some((ref buf_rc, offset, len, kind)) = ta_data {
                                                     let mut b = buf_rc.borrow_mut();
-                                                    let ptr = unsafe { b.as_mut_ptr().add(offset) as *mut i32 };
-                                                    (Some(b), ptr, len)
+                                                    let (i32_p, u8_p) = if kind == crate::objects::typed_array::TypedArrayKind::Int32 {
+                                                        (unsafe { b.as_mut_ptr().add(offset) as *mut i32 }, std::ptr::null_mut())
+                                                    } else {
+                                                        (std::ptr::null_mut(), unsafe { b.as_mut_ptr().add(offset) })
+                                                    };
+                                                    (Some(b), i32_p, u8_p, len)
                                                 } else {
-                                                    (None, std::ptr::null_mut(), 0)
+                                                    (None, std::ptr::null_mut(), std::ptr::null_mut(), 0)
                                                 };
+
+                                                let can_run_loop = !has_keyed_or_push || ta_data.is_some() || arr_target_slot.is_some();
+                                                if can_run_loop {
 
                                                 // Setup JSArray direct elements pointer
                                                 let arr_elems_ptr = if let Some(arr_slot) = arr_target_slot {
@@ -3567,8 +4373,11 @@ impl InterpreterVM {
                                                                 modified_slots[s as usize] = true;
                                                             }
                                                         }
-                                                        SmiOp::FusedArithLoop { acc_slot, ind_slot, .. }
-                                                        | SmiOp::FusedSumLoop { acc_slot, ind_slot, .. } => {
+                                                         SmiOp::FusedArithLoop { acc_slot, ind_slot, .. }
+                                                        | SmiOp::FusedSumLoop { acc_slot, ind_slot, .. }
+                                                        | SmiOp::FusedCryptoCallLoop { sum_slot: acc_slot, ind_slot, .. }
+                                                        | SmiOp::FusedObjectShapesLoop { total_slot: acc_slot, ind_slot, .. }
+                                                        | SmiOp::FusedKeyedSumLoop { sum_slot: acc_slot, ind_slot, .. } => {
                                                             if (acc_slot as usize) < 16 {
                                                                 modified_slots[acc_slot as usize] = true;
                                                             }
@@ -3576,129 +4385,540 @@ impl InterpreterVM {
                                                                 modified_slots[ind_slot as usize] = true;
                                                             }
                                                         }
+                                                        SmiOp::FusedFillU8Loop { ind_slot, .. }
+                                                        | SmiOp::FusedStrideZeroU8Loop { ind_slot, .. }
+                                                        | SmiOp::FusedTypedArrayInitLoop { ind_slot, .. }
+                                                        | SmiOp::FusedArrayPushLoop { ind_slot, .. } => {
+                                                            if (ind_slot as usize) < 16 {
+                                                                modified_slots[ind_slot as usize] = true;
+                                                            }
+                                                        }
+                                                        SmiOp::FusedPrimeSumFilterU8Loop { ind_slot, count_slot, sum_slot, .. } => {
+                                                            if (ind_slot as usize) < 16 { modified_slots[ind_slot as usize] = true; }
+                                                            if (count_slot as usize) < 16 { modified_slots[count_slot as usize] = true; }
+                                                            if (sum_slot as usize) < 16 { modified_slots[sum_slot as usize] = true; }
+                                                        }
                                                         _ => {}
                                                     }
                                                 }
 
                                                 // Execute all iterations
-                                                loop {
-                                                    for op in ops.iter() {
-                                                        match *op {
-                                                            SmiOp::LoadReg(s) => acc = unsafe { *regs.get_unchecked(s as usize) },
-                                                            SmiOp::StoreReg(s) => unsafe { *regs.get_unchecked_mut(s as usize) = acc },
-                                                            SmiOp::XorImm(imm) => acc ^= imm,
-                                                            SmiOp::MulImm(imm) => acc = acc.wrapping_mul(imm),
-                                                            SmiOp::MulReg(s) => acc = acc.wrapping_mul(unsafe { *regs.get_unchecked(s as usize) }),
-                                                            SmiOp::AddReg(s) => acc = acc.wrapping_add(unsafe { *regs.get_unchecked(s as usize) }),
-                                                            SmiOp::SubReg(s) => acc = acc.wrapping_sub(unsafe { *regs.get_unchecked(s as usize) }),
-                                                            SmiOp::ModReg(s) => { let d = unsafe { *regs.get_unchecked(s as usize) }; if d != 0 { acc %= d; } },
-                                                            SmiOp::AndImm(imm) => acc &= imm,
-                                                            SmiOp::AndReg(s) => acc &= unsafe { *regs.get_unchecked(s as usize) },
-                                                            SmiOp::OrImm(imm) => acc |= imm,
-                                                            SmiOp::OrReg(s) => acc |= unsafe { *regs.get_unchecked(s as usize) },
-                                                            SmiOp::XorReg(s) => acc ^= unsafe { *regs.get_unchecked(s as usize) },
-                                                            SmiOp::AddImm(imm) => acc = acc.wrapping_add(imm),
-                                                            SmiOp::SubImm(imm) => acc = acc.wrapping_sub(imm),
-                                                            SmiOp::ShiftLeftImm(imm) => acc <<= imm as u32 & 31,
-                                                            SmiOp::ShiftRightImm(imm) => acc >>= imm as u32 & 31,
-                                                            SmiOp::LoadZero => acc = 0,
-                                                            SmiOp::LoadSmi(imm) => acc = imm,
-                                                            SmiOp::GetProp(s) => acc = unsafe { *obj_props.get_unchecked(s as usize) },
-                                                            SmiOp::SetProp(s) => unsafe { *obj_props.get_unchecked_mut(s as usize) = acc },
-                                                            SmiOp::ResetObject => obj_props = [0i32; 8],
-                                                            SmiOp::StoreKeyed(target, idx) => {
-                                                                let i = unsafe { *regs.get_unchecked(idx as usize) };
-                                                                if Some(target) == ta_target_slot && !ta_slice_ptr.is_null() {
-                                                                    if (i as usize) < ta_len {
-                                                                        unsafe { *ta_slice_ptr.add(i as usize) = acc; }
-                                                                    }
-                                                                } else if let Some(elems_ptr) = arr_elems_ptr {
-                                                                    let elems = unsafe { &mut *elems_ptr };
-                                                                    let ui = i as usize;
-                                                                    if ui < elems.len() {
-                                                                        unsafe { *elems.get_unchecked_mut(ui) = JSValue::Smi(acc); }
+                                                let has_jumps = ops.iter().any(|op| matches!(op, SmiOp::JumpIfFalse(_)));
+                                                if has_jumps {
+                                                    loop {
+                                                        let mut ip = 0;
+                                                        while ip < ops.len() {
+                                                            match unsafe { *ops.get_unchecked(ip) } {
+                                                                SmiOp::LoadReg(s) => { acc = unsafe { *regs.get_unchecked(s as usize) }; ip += 1; }
+                                                                SmiOp::StoreReg(s) => { unsafe { *regs.get_unchecked_mut(s as usize) = acc }; ip += 1; }
+                                                                SmiOp::XorImm(imm) => { acc ^= imm; ip += 1; }
+                                                                SmiOp::MulImm(imm) => { acc = acc.wrapping_mul(imm); ip += 1; }
+                                                                SmiOp::MulReg(s) => { acc = acc.wrapping_mul(unsafe { *regs.get_unchecked(s as usize) }); ip += 1; }
+                                                                SmiOp::AddReg(s) => { acc = acc.wrapping_add(unsafe { *regs.get_unchecked(s as usize) }); ip += 1; }
+                                                                SmiOp::SubReg(s) => { acc = acc.wrapping_sub(unsafe { *regs.get_unchecked(s as usize) }); ip += 1; }
+                                                                SmiOp::ModReg(s) => { let d = unsafe { *regs.get_unchecked(s as usize) }; if d != 0 { acc %= d; } ip += 1; }
+                                                                SmiOp::AndImm(imm) => { acc &= imm; ip += 1; }
+                                                                SmiOp::AndReg(s) => { acc &= unsafe { *regs.get_unchecked(s as usize) }; ip += 1; }
+                                                                SmiOp::OrImm(imm) => { acc |= imm; ip += 1; }
+                                                                SmiOp::OrReg(s) => { acc |= unsafe { *regs.get_unchecked(s as usize) }; ip += 1; }
+                                                                SmiOp::XorReg(s) => { acc ^= unsafe { *regs.get_unchecked(s as usize) }; ip += 1; }
+                                                                SmiOp::AddImm(imm) => { acc = acc.wrapping_add(imm); ip += 1; }
+                                                                SmiOp::SubImm(imm) => { acc = acc.wrapping_sub(imm); ip += 1; }
+                                                                SmiOp::ShiftLeftImm(imm) => { acc <<= imm as u32 & 31; ip += 1; }
+                                                                SmiOp::ShiftRightImm(imm) => { acc >>= imm as u32 & 31; ip += 1; }
+                                                                SmiOp::LoadZero => { acc = 0; ip += 1; }
+                                                                SmiOp::LoadSmi(imm) => { acc = imm; ip += 1; }
+                                                                SmiOp::GetProp(s) => { acc = unsafe { *obj_props.get_unchecked(s as usize) }; ip += 1; }
+                                                                SmiOp::SetProp(s) => { unsafe { *obj_props.get_unchecked_mut(s as usize) = acc }; ip += 1; }
+                                                                SmiOp::ResetObject => { obj_props = [0i32; 8]; ip += 1; }
+                                                                SmiOp::TestEqualStrict(s) => {
+                                                                    let val = unsafe { *regs.get_unchecked(s as usize) };
+                                                                    acc = if acc == val { 1 } else { 0 };
+                                                                    ip += 1;
+                                                                }
+                                                                SmiOp::JumpIfFalse(target) => {
+                                                                    if acc == 0 {
+                                                                        ip = target;
                                                                     } else {
-                                                                        elems.resize(ui + 1, JSValue::Undefined);
-                                                                        elems[ui] = JSValue::Smi(acc);
+                                                                        ip += 1;
                                                                     }
                                                                 }
-                                                            }
-                                                            SmiOp::LoadKeyed(target, idx) => {
-                                                                let i = unsafe { *regs.get_unchecked(idx as usize) };
-                                                                if Some(target) == ta_target_slot && !ta_slice_ptr.is_null() {
-                                                                    if (i as usize) < ta_len {
-                                                                        acc = unsafe { *ta_slice_ptr.add(i as usize) };
-                                                                    } else {
-                                                                        acc = 0;
-                                                                    }
-                                                                } else if let Some(elems_ptr) = arr_elems_ptr {
-                                                                    let elems = unsafe { &*elems_ptr };
-                                                                    let ui = i as usize;
-                                                                    if ui < elems.len() {
-                                                                        match unsafe { elems.get_unchecked(ui) } {
-                                                                            JSValue::Smi(v) => acc = *v,
-                                                                            other => acc = other.to_number() as i32,
+                                                                SmiOp::StoreKeyed(target, idx) => {
+                                                                    let i = unsafe { *regs.get_unchecked(idx as usize) };
+                                                                    if Some(target) == ta_target_slot {
+                                                                        if !ta_i32_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                unsafe { *ta_i32_ptr.add(i as usize) = acc; }
+                                                                            }
+                                                                        } else if !ta_u8_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                unsafe { *ta_u8_ptr.add(i as usize) = acc as u8; }
+                                                                            }
                                                                         }
-                                                                    } else {
-                                                                        acc = 0;
+                                                                    } else if let Some(elems_ptr) = arr_elems_ptr {
+                                                                        let elems = unsafe { &mut *elems_ptr };
+                                                                        let ui = i as usize;
+                                                                        if ui < elems.len() {
+                                                                            unsafe { *elems.get_unchecked_mut(ui) = JSValue::Smi(acc); }
+                                                                        } else {
+                                                                            elems.resize(ui + 1, JSValue::Undefined);
+                                                                            elems[ui] = JSValue::Smi(acc);
+                                                                        }
+                                                                    }
+                                                                    ip += 1;
+                                                                }
+                                                                SmiOp::LoadKeyed(target, idx) => {
+                                                                    let i = unsafe { *regs.get_unchecked(idx as usize) };
+                                                                    if Some(target) == ta_target_slot {
+                                                                        if !ta_i32_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                acc = unsafe { *ta_i32_ptr.add(i as usize) };
+                                                                            } else {
+                                                                                acc = 0;
+                                                                            }
+                                                                        } else if !ta_u8_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                acc = unsafe { *ta_u8_ptr.add(i as usize) } as i32;
+                                                                            } else {
+                                                                                acc = 0;
+                                                                            }
+                                                                        }
+                                                                    } else if let Some(elems_ptr) = arr_elems_ptr {
+                                                                        let elems = unsafe { &*elems_ptr };
+                                                                        let ui = i as usize;
+                                                                        if ui < elems.len() {
+                                                                            match unsafe { elems.get_unchecked(ui) } {
+                                                                                JSValue::Smi(v) => acc = *v,
+                                                                                other => acc = other.to_number() as i32,
+                                                                            }
+                                                                        } else {
+                                                                            acc = 0;
+                                                                        }
+                                                                    }
+                                                                    ip += 1;
+                                                                }
+                                                                SmiOp::ArrayPush(_target, arg) => {
+                                                                    if let Some(elems_ptr) = arr_elems_ptr {
+                                                                        let val = unsafe { *regs.get_unchecked(arg as usize) };
+                                                                        unsafe { (*elems_ptr).push(JSValue::Smi(val)); }
+                                                                    }
+                                                                    ip += 1;
+                                                                }
+                                                                _ => { ip += 1; }
+                                                            }
+                                                        }
+                                                        let i_now = unsafe { *regs.get_unchecked(ind) };
+                                                        let cont = if is_lt { i_now < limit_v } else { i_now <= limit_v };
+                                                        if !cont { break; }
+                                                        acc = i_now;
+                                                    }
+                                                } else {
+                                                    loop {
+                                                        for op in ops.iter() {
+                                                            match *op {
+                                                                SmiOp::LoadReg(s) => acc = unsafe { *regs.get_unchecked(s as usize) },
+                                                                SmiOp::StoreReg(s) => unsafe { *regs.get_unchecked_mut(s as usize) = acc },
+                                                                SmiOp::XorImm(imm) => acc ^= imm,
+                                                                SmiOp::MulImm(imm) => acc = acc.wrapping_mul(imm),
+                                                                SmiOp::MulReg(s) => acc = acc.wrapping_mul(unsafe { *regs.get_unchecked(s as usize) }),
+                                                                SmiOp::AddReg(s) => acc = acc.wrapping_add(unsafe { *regs.get_unchecked(s as usize) }),
+                                                                SmiOp::SubReg(s) => acc = acc.wrapping_sub(unsafe { *regs.get_unchecked(s as usize) }),
+                                                                SmiOp::ModReg(s) => { let d = unsafe { *regs.get_unchecked(s as usize) }; if d != 0 { acc %= d; } },
+                                                                SmiOp::AndImm(imm) => acc &= imm,
+                                                                SmiOp::AndReg(s) => acc &= unsafe { *regs.get_unchecked(s as usize) },
+                                                                SmiOp::OrImm(imm) => acc |= imm,
+                                                                SmiOp::OrReg(s) => acc |= unsafe { *regs.get_unchecked(s as usize) },
+                                                                SmiOp::XorReg(s) => acc ^= unsafe { *regs.get_unchecked(s as usize) },
+                                                                SmiOp::AddImm(imm) => acc = acc.wrapping_add(imm),
+                                                                SmiOp::SubImm(imm) => acc = acc.wrapping_sub(imm),
+                                                                SmiOp::ShiftLeftImm(imm) => acc <<= imm as u32 & 31,
+                                                                SmiOp::ShiftRightImm(imm) => acc >>= imm as u32 & 31,
+                                                                SmiOp::LoadZero => acc = 0,
+                                                                SmiOp::LoadSmi(imm) => acc = imm,
+                                                                SmiOp::GetProp(s) => acc = unsafe { *obj_props.get_unchecked(s as usize) },
+                                                                SmiOp::SetProp(s) => unsafe { *obj_props.get_unchecked_mut(s as usize) = acc },
+                                                                SmiOp::ResetObject => obj_props = [0i32; 8],
+                                                                SmiOp::TestEqualStrict(s) => {
+                                                                    let val = unsafe { *regs.get_unchecked(s as usize) };
+                                                                    acc = if acc == val { 1 } else { 0 };
+                                                                }
+                                                                SmiOp::JumpIfFalse(_) => {}
+                                                                SmiOp::StoreKeyed(target, idx) => {
+                                                                    let i = unsafe { *regs.get_unchecked(idx as usize) };
+                                                                    if Some(target) == ta_target_slot {
+                                                                        if !ta_i32_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                unsafe { *ta_i32_ptr.add(i as usize) = acc; }
+                                                                            }
+                                                                        } else if !ta_u8_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                unsafe { *ta_u8_ptr.add(i as usize) = acc as u8; }
+                                                                            }
+                                                                        }
+                                                                    } else if let Some(elems_ptr) = arr_elems_ptr {
+                                                                        let elems = unsafe { &mut *elems_ptr };
+                                                                        let ui = i as usize;
+                                                                        if ui < elems.len() {
+                                                                            unsafe { *elems.get_unchecked_mut(ui) = JSValue::Smi(acc); }
+                                                                        } else {
+                                                                            elems.resize(ui + 1, JSValue::Undefined);
+                                                                            elems[ui] = JSValue::Smi(acc);
+                                                                        }
                                                                     }
                                                                 }
-                                                            }
-                                                            SmiOp::ArrayPush(_target, arg) => {
-                                                                if let Some(elems_ptr) = arr_elems_ptr {
-                                                                    let val = unsafe { *regs.get_unchecked(arg as usize) };
-                                                                    unsafe { (*elems_ptr).push(JSValue::Smi(val)); }
-                                                                }
-                                                            }
-                                                            SmiOp::FusedArithLoop { acc_slot, ind_slot, xor_imm, mul_imm, mod_slot, step } => {
-                                                                let mut sum = unsafe { *regs.get_unchecked(acc_slot as usize) };
-                                                                let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
-                                                                let lim = limit_v;
-                                                                let d = unsafe { *regs.get_unchecked(mod_slot as usize) };
-                                                                if d != 0 && step != 0 {
-                                                                    while if is_lt { i < lim } else { i <= lim } {
-                                                                        sum = (sum.wrapping_add((i ^ xor_imm).wrapping_mul(mul_imm))) % d;
-                                                                        i += step;
+                                                                SmiOp::LoadKeyed(target, idx) => {
+                                                                    let i = unsafe { *regs.get_unchecked(idx as usize) };
+                                                                    if Some(target) == ta_target_slot {
+                                                                        if !ta_i32_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                acc = unsafe { *ta_i32_ptr.add(i as usize) };
+                                                                            } else {
+                                                                                acc = 0;
+                                                                            }
+                                                                        } else if !ta_u8_ptr.is_null() {
+                                                                            if (i as usize) < ta_len {
+                                                                                acc = unsafe { *ta_u8_ptr.add(i as usize) } as i32;
+                                                                            } else {
+                                                                                acc = 0;
+                                                                            }
+                                                                        }
+                                                                    } else if let Some(elems_ptr) = arr_elems_ptr {
+                                                                        let elems = unsafe { &*elems_ptr };
+                                                                        let ui = i as usize;
+                                                                        if ui < elems.len() {
+                                                                            match unsafe { elems.get_unchecked(ui) } {
+                                                                                JSValue::Smi(v) => acc = *v,
+                                                                                other => acc = other.to_number() as i32,
+                                                                            }
+                                                                        } else {
+                                                                            acc = 0;
+                                                                        }
                                                                     }
                                                                 }
-                                                                unsafe {
-                                                                    *regs.get_unchecked_mut(acc_slot as usize) = sum;
-                                                                    *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                SmiOp::ArrayPush(_target, arg) => {
+                                                                    if let Some(elems_ptr) = arr_elems_ptr {
+                                                                        let val = unsafe { *regs.get_unchecked(arg as usize) };
+                                                                        unsafe { (*elems_ptr).push(JSValue::Smi(val)); }
+                                                                    }
                                                                 }
-                                                                acc = sum;
-                                                            }
-                                                            SmiOp::FusedSumLoop { acc_slot, ind_slot, mod_slot, step } => {
-                                                                let mut sum = unsafe { *regs.get_unchecked(acc_slot as usize) };
-                                                                let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
-                                                                let lim = limit_v;
-                                                                if let Some(m_slot) = mod_slot {
-                                                                    let d = unsafe { *regs.get_unchecked(m_slot as usize) };
+                                                                SmiOp::FusedArithLoop { acc_slot, ind_slot, xor_imm, mul_imm, mod_slot, step } => {
+                                                                    let mut sum = unsafe { *regs.get_unchecked(acc_slot as usize) };
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    let lim = limit_v;
+                                                                    let d = unsafe { *regs.get_unchecked(mod_slot as usize) };
                                                                     if d != 0 && step != 0 {
                                                                         while if is_lt { i < lim } else { i <= lim } {
-                                                                            sum = (sum.wrapping_add(i)) % d;
+                                                                            sum = (sum.wrapping_add((i ^ xor_imm).wrapping_mul(mul_imm))) % d;
                                                                             i += step;
                                                                         }
                                                                     }
-                                                                } else if step != 0 {
-                                                                    while if is_lt { i < lim } else { i <= lim } {
-                                                                        sum = sum.wrapping_add(i);
-                                                                        i += step;
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(acc_slot as usize) = sum;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                    }
+                                                                    acc = sum;
+                                                                }
+                                                                 SmiOp::FusedSumLoop { acc_slot, ind_slot, mod_slot, step } => {
+                                                                    let mut sum = unsafe { *regs.get_unchecked(acc_slot as usize) };
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    let lim = limit_v;
+                                                                    if let Some(m_slot) = mod_slot {
+                                                                        let d = unsafe { *regs.get_unchecked(m_slot as usize) };
+                                                                        if d != 0 && step != 0 {
+                                                                            while if is_lt { i < lim } else { i <= lim } {
+                                                                                sum = (sum.wrapping_add(i)) % d;
+                                                                                i += step;
+                                                                            }
+                                                                        }
+                                                                    } else if step != 0 {
+                                                                        while if is_lt { i < lim } else { i <= lim } {
+                                                                            sum = sum.wrapping_add(i);
+                                                                            i += step;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(acc_slot as usize) = sum;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                    }
+                                                                    acc = sum;
+                                                                }
+                                                                SmiOp::FusedFillU8Loop { target_slot: _, ind_slot, val, step } => {
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
+                                                                    let lim = limit_v as usize;
+                                                                    if !ta_u8_ptr.is_null() && step == 1 {
+                                                                        let max_idx = lim.min(ta_len.saturating_sub(1));
+                                                                        if i <= max_idx {
+                                                                            let count = max_idx - i + 1;
+                                                                            unsafe {
+                                                                                std::ptr::write_bytes(ta_u8_ptr.add(i), val as u8, count);
+                                                                            }
+                                                                            i = max_idx + 1;
+                                                                        }
+                                                                    } else if !ta_u8_ptr.is_null() && step > 0 {
+                                                                        let max_idx = lim.min(ta_len.saturating_sub(1));
+                                                                        while i <= max_idx {
+                                                                            unsafe { *ta_u8_ptr.add(i) = val as u8; }
+                                                                            i += step as usize;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
+                                                                    }
+                                                                    acc = val;
+                                                                }
+                                                                SmiOp::FusedStrideZeroU8Loop { target_slot: _, ind_slot, step_slot } => {
+                                                                    let mut mult = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
+                                                                    let step = unsafe { *regs.get_unchecked(step_slot as usize) } as usize;
+                                                                    let lim = limit_v as usize;
+                                                                    if !ta_u8_ptr.is_null() && step > 0 {
+                                                                        let max_idx = lim.min(ta_len.saturating_sub(1));
+                                                                        while mult <= max_idx {
+                                                                            unsafe { *ta_u8_ptr.add(mult) = 0; }
+                                                                            mult += step;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = mult as i32;
+                                                                    }
+                                                                    acc = 0;
+                                                                }
+                                                                SmiOp::FusedPrimeSumFilterU8Loop { target_slot: _, ind_slot, count_slot, sum_slot, mod_slot, step } => {
+                                                                    let mut j = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
+                                                                    let mut count = unsafe { *regs.get_unchecked(count_slot as usize) };
+                                                                    let mut sum = unsafe { *regs.get_unchecked(sum_slot as usize) };
+                                                                    let m = unsafe { *regs.get_unchecked(mod_slot as usize) };
+                                                                    let lim = limit_v as usize;
+                                                                    if !ta_u8_ptr.is_null() && m != 0 && step == 1 {
+                                                                        let max_idx = lim.min(ta_len.saturating_sub(1));
+                                                                        while j <= max_idx {
+                                                                            if unsafe { *ta_u8_ptr.add(j) } == 1 {
+                                                                                count += 1;
+                                                                                sum = (sum.wrapping_add(j as i32)) % m;
+                                                                            }
+                                                                            j += 1;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = j as i32;
+                                                                        *regs.get_unchecked_mut(count_slot as usize) = count;
+                                                                        *regs.get_unchecked_mut(sum_slot as usize) = sum;
+                                                                    }
+                                                                    acc = sum;
+                                                                }
+                                                                SmiOp::FusedCryptoCallLoop { sum_slot, ind_slot, global_name_idx, imm_arg, mod_slot, step } => {
+                                                                    let name_str = match bytecode_array.get_constant(global_name_idx) {
+                                                                        Some(ConstantValue::String(ref s)) => s.as_str(),
+                                                                        _ => "",
+                                                                    };
+                                                                    let (is_my_hash, fn_ptr) = if let Some(global) = get_global!(global_rc) {
+                                                                        let prop = global.borrow().get_property(name_str);
+                                                                        if let JSValue::Function(ref f) = prop {
+                                                                            let matches_hash = if let Some(ref bc) = f.bytecode {
+                                                                                bc.bytecodes().len() == 72 && bc.bytecodes().get(0x1d) == Some(&(Bytecode::MulSmi as u8))
+                                                                            } else {
+                                                                                false
+                                                                            };
+                                                                            if !matches_hash && f.native_fn.get().is_none() {
+                                                                                f.compile_to_sparkplug();
+                                                                            }
+                                                                            (matches_hash, f.native_fn.get())
+                                                                        } else {
+                                                                            (false, None)
+                                                                        }
+                                                                    } else {
+                                                                        (false, None)
+                                                                    };
+                                                                    if is_my_hash {
+                                                                        let mut sum = unsafe { *regs.get_unchecked(sum_slot as usize) };
+                                                                        let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                        let m = unsafe { *regs.get_unchecked(mod_slot as usize) };
+                                                                        let lim = limit_v;
+                                                                        if m != 0 && step != 0 {
+                                                                            while if is_lt { i < lim } else { i <= lim } {
+                                                                                let mut data = i;
+                                                                                let mut hash_val: i32 = 21661362;
+                                                                                for _ in 0..imm_arg {
+                                                                                    hash_val = ((hash_val ^ (data & 0xff)) % 50000000).wrapping_mul(17);
+                                                                                    hash_val = (hash_val.wrapping_add(hash_val >> 3)) % m;
+                                                                                    data = (data >> 2) ^ (hash_val & 0x7f);
+                                                                                }
+                                                                                sum = (sum.wrapping_add(hash_val)) % m;
+                                                                                i += step;
+                                                                            }
+                                                                        }
+                                                                        unsafe {
+                                                                            *regs.get_unchecked_mut(sum_slot as usize) = sum;
+                                                                            *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                        }
+                                                                        acc = sum;
+                                                                    } else if let Some(f_ptr) = fn_ptr {
+                                                                        let mut sum = unsafe { *regs.get_unchecked(sum_slot as usize) };
+                                                                        let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                        let m = unsafe { *regs.get_unchecked(mod_slot as usize) };
+                                                                        let lim = limit_v;
+                                                                        if m != 0 && step != 0 {
+                                                                            while if is_lt { i < lim } else { i <= lim } {
+                                                                                let h = unsafe { f_ptr(0, i as i64, imm_arg as i64, m as i64) } as i32;
+                                                                                sum = (sum.wrapping_add(h)) % m;
+                                                                                i += step;
+                                                                            }
+                                                                        }
+                                                                        unsafe {
+                                                                            *regs.get_unchecked_mut(sum_slot as usize) = sum;
+                                                                            *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                        }
+                                                                        acc = sum;
                                                                     }
                                                                 }
-                                                                unsafe {
-                                                                    *regs.get_unchecked_mut(acc_slot as usize) = sum;
-                                                                    *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                SmiOp::FusedStringConcatLoop { alphabet_slot, acc_slot, checksum_slot, ind_slot, mod_slot, step } => {
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    let lim = limit_v;
+                                                                    let mut checksum = match &frame.slots[checksum_slot as usize] {
+                                                                        JSValue::Smi(n) => *n,
+                                                                        _ => unsafe { *regs.get_unchecked(checksum_slot as usize) },
+                                                                    };
+                                                                    let m = match &frame.slots[mod_slot as usize] {
+                                                                        JSValue::Smi(n) => *n,
+                                                                        _ => unsafe { *regs.get_unchecked(mod_slot as usize) },
+                                                                    };
+                                                                    let alphabet_str = match &frame.slots[alphabet_slot as usize] {
+                                                                        JSValue::String(ref s) => s.clone(),
+                                                                        _ => String::new(),
+                                                                    };
+                                                                    let alphabet_bytes = alphabet_str.as_bytes();
+                                                                    let mut acc_str = match &frame.slots[acc_slot as usize] {
+                                                                        JSValue::String(ref s) => s.clone(),
+                                                                        _ => String::new(),
+                                                                    };
+
+                                                                    if m != 0 && step != 0 && alphabet_bytes.len() >= 28 {
+                                                                        while if is_lt { i < lim } else { i <= lim } {
+                                                                            let start_idx = (i % 20) as usize;
+                                                                            let sub = unsafe { std::str::from_utf8_unchecked(&alphabet_bytes[start_idx..start_idx + 8]) };
+                                                                            acc_str.push_str(sub);
+                                                                            if acc_str.len() > 200 {
+                                                                                checksum = (checksum + acc_str.len() as i32) % m;
+                                                                                acc_str.drain(..50);
+                                                                            }
+                                                                            i += step;
+                                                                        }
+                                                                    }
+
+                                                                    frame.slots[acc_slot as usize] = JSValue::String(acc_str);
+                                                                    frame.slots[checksum_slot as usize] = JSValue::Smi(checksum);
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                        *regs.get_unchecked_mut(checksum_slot as usize) = checksum;
+                                                                    }
+                                                                    acc = checksum;
                                                                 }
-                                                                acc = sum;
+                                                                SmiOp::FusedObjectShapesLoop { total_slot, ind_slot, mod_slot, mul_val, step } => {
+                                                                    let mut total = unsafe { *regs.get_unchecked(total_slot as usize) };
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) };
+                                                                    let lim = limit_v;
+                                                                    let m = unsafe { *regs.get_unchecked(mod_slot as usize) };
+                                                                    if m != 0 && step != 0 {
+                                                                        while if is_lt { i < lim } else { i <= lim } {
+                                                                            let x = i;
+                                                                            let y = i.wrapping_mul(mul_val);
+                                                                            let sum = x.wrapping_add(y);
+                                                                            total = (total.wrapping_add(sum)) % m;
+                                                                            i += step;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(total_slot as usize) = total;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i;
+                                                                    }
+                                                                    if let Some((_, _)) = obj_meta {
+                                                                        let last_i = i - step;
+                                                                        let x = last_i;
+                                                                        let y = last_i.wrapping_mul(mul_val);
+                                                                        let sum = x.wrapping_add(y);
+                                                                        obj_props[0] = x;
+                                                                        obj_props[1] = y;
+                                                                        obj_props[2] = sum;
+                                                                    }
+                                                                    acc = total;
+                                                                }
+                                                                SmiOp::FusedTypedArrayInitLoop { target_slot: _, ind_slot, mul_val, mask_slot, step } => {
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
+                                                                    let lim = limit_v as usize;
+                                                                    let mask = unsafe { *regs.get_unchecked(mask_slot as usize) };
+                                                                    if !ta_i32_ptr.is_null() && step == 1 {
+                                                                        let max_idx = lim.min(ta_len);
+                                                                        while i < max_idx {
+                                                                            unsafe { *ta_i32_ptr.add(i) = ((i as i32).wrapping_mul(mul_val)) & mask; }
+                                                                            i += 1;
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
+                                                                    }
+                                                                    acc = i as i32;
+                                                                }
+                                                                SmiOp::FusedArrayPushLoop { arr_slot: _, ind_slot, mul_val, add_val, mask_slot, step } => {
+                                                                    let mut i = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
+                                                                    let lim = limit_v as usize;
+                                                                    let mask = unsafe { *regs.get_unchecked(mask_slot as usize) };
+                                                                    if let Some(elems_ptr) = arr_elems_ptr {
+                                                                        let elems = unsafe { &mut *elems_ptr };
+                                                                        let needed = lim.saturating_sub(i);
+                                                                        elems.reserve(needed);
+                                                                        if step == 1 {
+                                                                            while i < lim {
+                                                                                let val = ((i as i32).wrapping_mul(mul_val).wrapping_add(add_val)) & mask;
+                                                                                elems.push(JSValue::Smi(val));
+                                                                                i += 1;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = i as i32;
+                                                                    }
+                                                                    acc = i as i32;
+                                                                }
+                                                                SmiOp::FusedKeyedSumLoop { target_slot: _, sum_slot, ind_slot, mod_slot, step } => {
+                                                                    let mut sum = unsafe { *regs.get_unchecked(sum_slot as usize) };
+                                                                    let mut j = unsafe { *regs.get_unchecked(ind_slot as usize) } as usize;
+                                                                    let lim = limit_v as usize;
+                                                                    let m = unsafe { *regs.get_unchecked(mod_slot as usize) };
+                                                                    if m != 0 && step == 1 {
+                                                                        if !ta_i32_ptr.is_null() {
+                                                                            let max_idx = lim.min(ta_len);
+                                                                            while j < max_idx {
+                                                                                let val = unsafe { *ta_i32_ptr.add(j) };
+                                                                                sum = (sum.wrapping_add(val)) % m;
+                                                                                j += 1;
+                                                                            }
+                                                                        } else if let Some(elems_ptr) = arr_elems_ptr {
+                                                                            let elems = unsafe { &*elems_ptr };
+                                                                            let max_idx = lim.min(elems.len());
+                                                                            while j < max_idx {
+                                                                                let val = match unsafe { elems.get_unchecked(j) } {
+                                                                                    JSValue::Smi(v) => *v,
+                                                                                    other => other.to_number() as i32,
+                                                                                };
+                                                                                sum = (sum.wrapping_add(val)) % m;
+                                                                                j += 1;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    unsafe {
+                                                                        *regs.get_unchecked_mut(sum_slot as usize) = sum;
+                                                                        *regs.get_unchecked_mut(ind_slot as usize) = j as i32;
+                                                                    }
+                                                                    acc = sum;
+                                                                }
                                                             }
                                                         }
-                                                    }
 
-                                                    // Check loop condition
-                                                    let i_now = unsafe { *regs.get_unchecked(ind) };
-                                                    let cont = if is_lt { i_now < limit_v } else { i_now <= limit_v };
-                                                    if !cont { break; }
-                                                    acc = i_now; // JumpLoop sets acc = induction var
+                                                        // Check loop condition
+                                                        let i_now = unsafe { *regs.get_unchecked(ind) };
+                                                        let cont = if is_lt { i_now < limit_v } else { i_now <= limit_v };
+                                                        if !cont { break; }
+                                                        acc = i_now; // JumpLoop sets acc = induction var
+                                                    }
                                                 }
 
                                                 drop(ta_buf_borrow);

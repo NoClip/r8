@@ -39,6 +39,7 @@ pub struct JSFunction {
     pub name: String,
     pub bytecode: Option<Rc<BytecodeArray>>,
     pub is_jit: Cell<bool>,
+    pub native_fn: Cell<Option<unsafe extern "C" fn(i64, i64, i64, i64) -> i64>>,
     pub kind: RefCell<FunctionKind>,
     pub invocation_count: Cell<usize>,
 }
@@ -55,6 +56,7 @@ impl JSFunction {
             name: name.to_string(),
             bytecode: None,
             is_jit: Cell::new(false),
+            native_fn: Cell::new(None),
             kind: RefCell::new(FunctionKind::Native(callback)),
             invocation_count: Cell::new(0),
         })
@@ -69,6 +71,7 @@ impl JSFunction {
             name: name.to_string(),
             bytecode: None,
             is_jit: Cell::new(false),
+            native_fn: Cell::new(None),
             kind: RefCell::new(FunctionKind::Closure(Rc::new(callback))),
             invocation_count: Cell::new(0),
         })
@@ -80,6 +83,7 @@ impl JSFunction {
             name: name.to_string(),
             bytecode: Some(bytecode.clone()),
             is_jit: Cell::new(false),
+            native_fn: Cell::new(None),
             kind: RefCell::new(FunctionKind::Bytecode(bytecode)),
             invocation_count: Cell::new(0),
         })
@@ -91,10 +95,12 @@ impl JSFunction {
         bytecode: Rc<BytecodeArray>,
         executable: Rc<NativeExecutable>,
     ) -> Rc<Self> {
+        let raw_fn = executable.raw_fn_ptr();
         Rc::new(Self {
             name: name.to_string(),
             bytecode: Some(bytecode.clone()),
             is_jit: Cell::new(true),
+            native_fn: Cell::new(raw_fn),
             kind: RefCell::new(FunctionKind::JitCompiled {
                 bytecode,
                 executable,
@@ -120,10 +126,12 @@ impl JSFunction {
                 return false;
             }
             let executable = crate::compiler::sparkplug::SparkplugCompiler::compile(&bytecode);
+            let raw_fn = executable.raw_fn_ptr();
             *self.kind.borrow_mut() = FunctionKind::BaselineJit {
                 bytecode,
                 executable: Rc::new(executable),
             };
+            self.native_fn.set(raw_fn);
             self.is_jit.set(true);
             true
         } else {
@@ -147,10 +155,12 @@ impl JSFunction {
                 &bytecode,
                 CallingConvention::host_default(),
             );
+            let raw_fn = executable.raw_fn_ptr();
             *self.kind.borrow_mut() = FunctionKind::JitCompiled {
                 bytecode,
                 executable: Rc::new(executable),
             };
+            self.native_fn.set(raw_fn);
             self.is_jit.set(true);
             true
         } else {

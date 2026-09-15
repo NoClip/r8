@@ -62,16 +62,21 @@ impl Factory {
                 name: name.to_string(),
                 bytecode: None,
                 is_jit: std::cell::Cell::new(false),
+                native_fn: std::cell::Cell::new(None),
                 kind: std::cell::RefCell::new(FunctionKind::Closure(cb)),
                 invocation_count: std::cell::Cell::new(0),
             },
             FunctionKind::Bytecode(bc) => (*JSFunction::new_bytecode(name, bc)).clone(),
-            FunctionKind::BaselineJit { bytecode, executable } => JSFunction {
-                name: name.to_string(),
-                bytecode: Some(bytecode.clone()),
-                is_jit: std::cell::Cell::new(true),
-                kind: std::cell::RefCell::new(FunctionKind::BaselineJit { bytecode, executable }),
-                invocation_count: std::cell::Cell::new(0),
+            FunctionKind::BaselineJit { bytecode, executable } => {
+                let raw_fn = executable.raw_fn_ptr();
+                JSFunction {
+                    name: name.to_string(),
+                    bytecode: Some(bytecode.clone()),
+                    is_jit: std::cell::Cell::new(true),
+                    native_fn: std::cell::Cell::new(raw_fn),
+                    kind: std::cell::RefCell::new(FunctionKind::BaselineJit { bytecode, executable }),
+                    invocation_count: std::cell::Cell::new(0),
+                }
             },
             FunctionKind::JitCompiled { bytecode, executable } => (*JSFunction::new_jit_compiled(name, bytecode, executable)).clone(),
         };

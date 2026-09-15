@@ -282,6 +282,72 @@ impl X64Assembler {
         self.emit_modrm(0b11, 7, dst.code());
     }
 
+    /// `sar dst, imm8` (arithmetic shift right by immediate)
+    pub fn sar_reg_imm(&mut self, dst: X64Register, imm: u8) {
+        self.emit_rex(true, false, false, dst.is_extended());
+        self.emit_u8(0xC1);
+        self.emit_modrm(0b11, 7, dst.code());
+        self.emit_u8(imm);
+    }
+
+    /// `shl dst, imm8` (shift left by immediate)
+    pub fn shl_reg_imm(&mut self, dst: X64Register, imm: u8) {
+        self.emit_rex(true, false, false, dst.is_extended());
+        self.emit_u8(0xC1);
+        self.emit_modrm(0b11, 4, dst.code());
+        self.emit_u8(imm);
+    }
+
+    /// `shr dst, imm8` (logical shift right by immediate)
+    pub fn shr_reg_imm(&mut self, dst: X64Register, imm: u8) {
+        self.emit_rex(true, false, false, dst.is_extended());
+        self.emit_u8(0xC1);
+        self.emit_modrm(0b11, 5, dst.code());
+        self.emit_u8(imm);
+    }
+
+    /// `cqo` (sign-extend RAX into RDX:RAX)
+    pub fn cqo(&mut self) {
+        self.emit_rex(true, false, false, false);
+        self.emit_u8(0x99);
+    }
+
+    /// `cdq` (sign-extend EAX into EDX:EAX)
+    pub fn cdq(&mut self) {
+        self.emit_u8(0x99);
+    }
+
+    /// `idiv reg` (signed divide RDX:RAX by reg)
+    pub fn idiv_reg(&mut self, src: X64Register) {
+        self.emit_rex(true, false, false, src.is_extended());
+        self.emit_u8(0xF7);
+        self.emit_modrm(0b11, 7, src.code());
+    }
+
+    /// `xor dst, imm32`
+    pub fn xor_reg_imm32(&mut self, dst: X64Register, imm: i32) {
+        self.emit_rex(true, false, false, dst.is_extended());
+        self.emit_u8(0x81);
+        self.emit_modrm(0b11, 6, dst.code());
+        self.emit_u32(imm as u32);
+    }
+
+    /// `and dst, imm32`
+    pub fn and_reg_imm32(&mut self, dst: X64Register, imm: i32) {
+        self.emit_rex(true, false, false, dst.is_extended());
+        self.emit_u8(0x81);
+        self.emit_modrm(0b11, 4, dst.code());
+        self.emit_u32(imm as u32);
+    }
+
+    /// `or dst, imm32`
+    pub fn or_reg_imm32(&mut self, dst: X64Register, imm: i32) {
+        self.emit_rex(true, false, false, dst.is_extended());
+        self.emit_u8(0x81);
+        self.emit_modrm(0b11, 1, dst.code());
+        self.emit_u32(imm as u32);
+    }
+
     // -------------------------------------------------------------------------
     // Comparisons & Condition Codes
     // -------------------------------------------------------------------------

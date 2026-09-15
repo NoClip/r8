@@ -6,6 +6,7 @@
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, Write};
+use r8 as v8_base_bits;
 use v8_base_bits::compiler::CompilerPipeline;
 use v8_base_bits::heap::{GarbageCollectionType, Heap};
 use v8_base_bits::interpreter::bytecode_generator::BytecodeGenerator;

@@ -72,18 +72,27 @@ impl<'a> SparkplugCompiler<'a> {
                 x if x == Bytecode::Add as u8
                     || x == Bytecode::Sub as u8
                     || x == Bytecode::Mul as u8
+                    || x == Bytecode::Div as u8
+                    || x == Bytecode::Mod as u8
                     || x == Bytecode::BitwiseAnd as u8
                     || x == Bytecode::BitwiseOr as u8
-                    || x == Bytecode::BitwiseXor as u8 => {
+                    || x == Bytecode::BitwiseXor as u8
+                    || x == Bytecode::ShiftLeft as u8
+                    || x == Bytecode::ShiftRight as u8
+                    || x == Bytecode::ShiftRightLogical as u8 => {
                     if pc + 1 >= bytes.len() { return false; }
                     pc += 2;
                 }
                 x if x == Bytecode::AddSmi as u8
                     || x == Bytecode::SubSmi as u8
                     || x == Bytecode::MulSmi as u8
+                    || x == Bytecode::ModSmi as u8
                     || x == Bytecode::BitwiseAndSmi as u8
                     || x == Bytecode::BitwiseOrSmi as u8
-                    || x == Bytecode::BitwiseXorSmi as u8 => {
+                    || x == Bytecode::BitwiseXorSmi as u8
+                    || x == Bytecode::ShiftLeftSmi as u8
+                    || x == Bytecode::ShiftRightSmi as u8
+                    || x == Bytecode::ShiftRightLogicalSmi as u8 => {
                     if pc + 1 >= bytes.len() { return false; }
                     pc += 2;
                 }
@@ -288,6 +297,44 @@ impl<'a> SparkplugCompiler<'a> {
                     self.masm.mov_reg_mem(X64Register::R10, X64Register::Rbp, Self::slot_offset(slot));
                     self.masm.imul_reg_reg(X64Register::Rax, X64Register::R10);
                 }
+                Bytecode::Mod => {
+                    let reg_byte = bytes[pc] as i8;
+                    pc += 2;
+                    let slot = Self::operand_to_slot(reg_byte);
+                    self.masm.mov_reg_mem(X64Register::R10, X64Register::Rbp, Self::slot_offset(slot));
+                    self.masm.cqo();
+                    self.masm.idiv_reg(X64Register::R10);
+                    self.masm.mov_reg_reg(X64Register::Rax, X64Register::Rdx);
+                }
+                Bytecode::Div => {
+                    let reg_byte = bytes[pc] as i8;
+                    pc += 2;
+                    let slot = Self::operand_to_slot(reg_byte);
+                    self.masm.mov_reg_mem(X64Register::R10, X64Register::Rbp, Self::slot_offset(slot));
+                    self.masm.cqo();
+                    self.masm.idiv_reg(X64Register::R10);
+                }
+                Bytecode::ShiftLeft => {
+                    let reg_byte = bytes[pc] as i8;
+                    pc += 2;
+                    let slot = Self::operand_to_slot(reg_byte);
+                    self.masm.mov_reg_mem(X64Register::Rcx, X64Register::Rbp, Self::slot_offset(slot));
+                    self.masm.shl_reg_cl(X64Register::Rax);
+                }
+                Bytecode::ShiftRight => {
+                    let reg_byte = bytes[pc] as i8;
+                    pc += 2;
+                    let slot = Self::operand_to_slot(reg_byte);
+                    self.masm.mov_reg_mem(X64Register::Rcx, X64Register::Rbp, Self::slot_offset(slot));
+                    self.masm.sar_reg_cl(X64Register::Rax);
+                }
+                Bytecode::ShiftRightLogical => {
+                    let reg_byte = bytes[pc] as i8;
+                    pc += 2;
+                    let slot = Self::operand_to_slot(reg_byte);
+                    self.masm.mov_reg_mem(X64Register::Rcx, X64Register::Rbp, Self::slot_offset(slot));
+                    self.masm.shr_reg_cl(X64Register::Rax);
+                }
                 Bytecode::BitwiseAnd => {
                     let reg_byte = bytes[pc] as i8;
                     pc += 2;
@@ -342,6 +389,29 @@ impl<'a> SparkplugCompiler<'a> {
                     pc += 2;
                     self.masm.mov_reg_imm32(X64Register::R10, imm);
                     self.masm.xor_reg_reg(X64Register::Rax, X64Register::R10);
+                }
+                Bytecode::ModSmi => {
+                    let imm = bytes[pc] as i8 as i32;
+                    pc += 2;
+                    self.masm.mov_reg_imm32(X64Register::R10, imm);
+                    self.masm.cqo();
+                    self.masm.idiv_reg(X64Register::R10);
+                    self.masm.mov_reg_reg(X64Register::Rax, X64Register::Rdx);
+                }
+                Bytecode::ShiftLeftSmi => {
+                    let imm = bytes[pc] as i8 as u8;
+                    pc += 2;
+                    self.masm.shl_reg_imm(X64Register::Rax, imm);
+                }
+                Bytecode::ShiftRightSmi => {
+                    let imm = bytes[pc] as i8 as u8;
+                    pc += 2;
+                    self.masm.sar_reg_imm(X64Register::Rax, imm);
+                }
+                Bytecode::ShiftRightLogicalSmi => {
+                    let imm = bytes[pc] as i8 as u8;
+                    pc += 2;
+                    self.masm.shr_reg_imm(X64Register::Rax, imm);
                 }
                 Bytecode::Inc => {
                     self.masm.add_reg_imm32(X64Register::Rax, 1);

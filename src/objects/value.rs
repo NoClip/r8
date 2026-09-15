@@ -176,11 +176,25 @@ impl JSValue {
             }
             return JSValue::Number(*a as f64 + *b as f64);
         }
+        if let (JSValue::String(a), JSValue::String(b)) = (self, other) {
+            let mut res = String::with_capacity(a.len() + b.len());
+            res.push_str(a);
+            res.push_str(b);
+            return JSValue::String(res);
+        }
         if let (JSValue::String(a), b) = (self, other) {
-            return JSValue::String(format!("{}{}", a, b.to_string_val()));
+            let bs = b.to_string_val();
+            let mut res = String::with_capacity(a.len() + bs.len());
+            res.push_str(a);
+            res.push_str(&bs);
+            return JSValue::String(res);
         }
         if let (a, JSValue::String(b)) = (self, other) {
-            return JSValue::String(format!("{}{}", a.to_string_val(), b));
+            let as_str = a.to_string_val();
+            let mut res = String::with_capacity(as_str.len() + b.len());
+            res.push_str(&as_str);
+            res.push_str(b);
+            return JSValue::String(res);
         }
         JSValue::Number(self.to_number() + other.to_number())
     }

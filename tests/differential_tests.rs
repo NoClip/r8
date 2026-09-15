@@ -1,7 +1,7 @@
 //! Comprehensive differential test suite porting all tests from V8's
 //! `test/unittests/base/bits-unittest.cc` and adding differential validation
 //! against V8 C++ reference algorithms.
-
+use r8 as v8_base_bits;
 use v8_base_bits::*;
 
 // Reference algorithms from Hacker's Delight / V8 C++ bits.h fallback implementations
