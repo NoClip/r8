@@ -23,6 +23,7 @@ pub mod wasm;
 pub mod c_api;
 pub mod inspector;
 pub mod snapshot;
+pub mod cli;
 
 pub use ast::*;
 pub use bit_field::*;

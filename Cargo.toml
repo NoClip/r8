@@ -7,6 +7,18 @@ edition = "2021"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
+name = "r8"
+path = "src/bin/r8.rs"
+
+[[bin]]
+name = "rd8"
+path = "src/bin/rd8.rs"
+
+[[bin]]
+name = "r8x"
+path = "src/bin/r8x.rs"
+
+[[bin]]
 name = "d8"
 path = "src/bin/d8.rs"
 

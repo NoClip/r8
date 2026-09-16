@@ -1,6 +1,6 @@
-//! Google V8 Compatibility Shell (`d8`) - Safe Rust R8 Implementation.
+//! R8 - Safe Rust V8 JavaScript & WebAssembly Engine.
 //!
-//! Provides a drop-in compatible interface for Google's V8 Developer Shell.
+//! Universal execution engine, REPL, and script runner.
 
 use std::env;
 use std::fs;
@@ -10,16 +10,15 @@ use r8::inspector::server::InspectorServer;
 use r8::inspector::InspectorSession;
 use r8::runtime::Context;
 
-const VERSION: &str = "d8 0.1.0 (Google V8 Compatibility Shell - Safe Rust R8)";
+const VERSION: &str = "r8 0.1.0 (Safe Rust V8 JavaScript & WebAssembly Engine)";
 
 fn print_help() {
-    println!("d8 0.1.0 - Google V8 Compatibility Shell (Safe Rust R8)\n");
-    println!("Usage: d8 [options] [script.js | script.wasm] [-- [arguments]]\n");
-    println!("Options:");
+    println!("r8 0.1.0 - Safe Rust V8 JavaScript & WebAssembly Engine\n");
+    println!("Usage: r8 [options] [script.js | script.wasm] [-- [arguments]]\n");
+    println!("Commands & Options:");
     println!("  -e, --eval <code>     Evaluate string as JavaScript");
     println!("  -p, --print <code>    Evaluate string as JavaScript and print result");
-    println!("  --print-bytecode      Print disassembled Ignition bytecode");
-    println!("  --print-ir            Print Sea-of-Nodes IR graph");
+    println!("  --jitless             Run in interpreter-only mode");
     println!("  --expose-gc           Expose gc() function to scripts");
     println!("  --inspect[=addr]      Start Chrome DevTools Protocol (CDP) inspector session");
     println!("  --mksnapshot <file>   Serialize initialized heap snapshot to binary file");
@@ -57,6 +56,8 @@ fn main() {
             print_ir = true;
         } else if arg == "--expose-gc" {
             expose_gc = true;
+        } else if arg == "--jitless" {
+            // R8's tiering allows interpreter-only execution
         } else if arg == "--inspect" || arg == "--inspect-brk" {
             inspect_mode = true;
         } else if arg.starts_with("--inspect=") {
@@ -113,7 +114,7 @@ fn main() {
         let addr = inspect_address.unwrap_or_else(|| "127.0.0.1:9229".to_string());
         match InspectorServer::bind(&addr) {
             Ok(server) => {
-                println!("Debugger listening on ws://{}/devtools/page/d8-main", addr);
+                println!("Debugger listening on ws://{}/devtools/page/r8-main", addr);
                 println!("For help, see: https://nodejs.org/en/docs/inspector");
                 server.run_loop();
             }
@@ -190,6 +191,6 @@ fn main() {
             }
         }
     } else {
-        run_repl(ctx, "d8> ", VERSION, print_bytecode, print_ir);
+        run_repl(ctx, "r8> ", VERSION, print_bytecode, print_ir);
     }
 }
