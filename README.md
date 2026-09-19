@@ -1,4 +1,4 @@
-# R8 — High-Performance JavaScript & WebAssembly Engine
+# R8 — High-Performance JavaScript & WebAssembly Engine (Based on V8)
 
 [![V8 Specification](https://img.shields.io/badge/V8%20Specification-Based%20on%20V8%2012.8-blue.svg)](#)
 [![Version](https://img.shields.io/badge/Version-12.8.0-informational.svg)](#)
