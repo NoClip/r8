@@ -4,6 +4,7 @@
 [![Version](https://img.shields.io/badge/Version-12.8.0-informational.svg)](#)
 [![Differential Tests](https://img.shields.io/badge/Differential%20Tests-227%20%2F%20227%20Passing%20(100%25)-success.svg)](#)
 [![Performance](https://img.shields.io/badge/Performance-Faster%20than%20V8%20TurboFan-brightgreen.svg)](#)
+[![Made With AI](https://img.shields.io/badge/Made%20With-AI-blueviolet.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 R8 is a high-performance, drop-in compatible JavaScript and WebAssembly engine based on Google V8 version 12.8. Engineered for high-throughput compute, low-latency startup, and predictable execution, R8 provides standard CLI tools (`r8`, `rd8`, `r8x`), native embedding libraries (`libr8`), and ECMAScript/Wasm standards compliance.
