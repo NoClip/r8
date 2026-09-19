@@ -1,6 +1,6 @@
-//! RD8 - R8 Developer Shell.
+//! RS8 - R8 Interactive & Diagnostic Shell.
 //!
-//! Drop-in replacement for Google's V8 Developer Shell (`d8`) without PATH naming conflicts.
+//! Interactive shell and developer environment based on Google V8 12.8.
 //! Provides bytecode disassembly, Sea-of-Nodes IR inspection, snapshot serialization,
 //! and interactive REPL.
 
@@ -12,12 +12,12 @@ use r8::inspector::server::InspectorServer;
 use r8::inspector::InspectorSession;
 use r8::runtime::Context;
 
-const VERSION: &str = "rd8 12.8.0 (R8 Developer Shell - based on Google V8 12.8)";
+const VERSION: &str = "rs8 12.8.0 (R8 Shell - based on Google V8 12.8)";
 
 fn print_help() {
-    println!("rd8 12.8.0 - R8 Developer Shell (based on Google V8 12.8)\n");
-    println!("Usage: rd8 [options] [script.js | script.wasm] [-- [arguments]]\n");
-    println!("Developer & Inspection Options:");
+    println!("rs8 12.8.0 - R8 Shell (based on Google V8 12.8)\n");
+    println!("Usage: rs8 [options] [script.js | script.wasm] [-- [arguments]]\n");
+    println!("Options:");
     println!("  -e, --eval <code>     Evaluate string as JavaScript");
     println!("  -p, --print <code>    Evaluate string as JavaScript and print result");
     println!("  --print-bytecode      Print disassembled Ignition bytecode");
@@ -115,7 +115,7 @@ fn main() {
         let addr = inspect_address.unwrap_or_else(|| "127.0.0.1:9229".to_string());
         match InspectorServer::bind(&addr) {
             Ok(server) => {
-                println!("Debugger listening on ws://{}/devtools/page/rd8-main", addr);
+                println!("Debugger listening on ws://{}/devtools/page/rs8-main", addr);
                 println!("For help, see: https://nodejs.org/en/docs/inspector");
                 server.run_loop();
             }
@@ -192,6 +192,6 @@ fn main() {
             }
         }
     } else {
-        run_repl(ctx, "rd8> ", VERSION, print_bytecode, print_ir);
+        run_repl(ctx, "rs8> ", VERSION, print_bytecode, print_ir);
     }
 }

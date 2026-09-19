@@ -10,10 +10,10 @@ use r8::inspector::server::InspectorServer;
 use r8::inspector::InspectorSession;
 use r8::runtime::Context;
 
-const VERSION: &str = "d8 0.1.0 (Google V8 Compatibility Shell - Safe Rust R8)";
+const VERSION: &str = "d8 12.8.0 (Google V8 Compatibility Shell - based on Google V8 12.8)";
 
 fn print_help() {
-    println!("d8 0.1.0 - Google V8 Compatibility Shell (Safe Rust R8)\n");
+    println!("d8 12.8.0 - Google V8 Compatibility Shell (based on Google V8 12.8)\n");
     println!("Usage: d8 [options] [script.js | script.wasm] [-- [arguments]]\n");
     println!("Options:");
     println!("  -e, --eval <code>     Evaluate string as JavaScript");

@@ -1,6 +1,6 @@
 [package]
 name = "r8"
-version = "0.1.0"
+version = "12.8.0"
 edition = "2021"
 
 [lib]
@@ -13,6 +13,10 @@ path = "src/bin/r8.rs"
 [[bin]]
 name = "rd8"
 path = "src/bin/rd8.rs"
+
+[[bin]]
+name = "rs8"
+path = "src/bin/rs8.rs"
 
 [[bin]]
 name = "r8x"

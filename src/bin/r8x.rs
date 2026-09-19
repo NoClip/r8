@@ -1,4 +1,4 @@
-//! R8X - R8 Script & Command Executor (100% Pure Safe Rust).
+//! R8X - R8 Script & Command Executor.
 //!
 //! One-off script, command, and expression runner (analogous to npx / bunx).
 
@@ -7,10 +7,10 @@ use std::fs;
 use r8::cli::{execute_source, run_wasm_file, setup_cli_builtins};
 use r8::runtime::Context;
 
-const VERSION: &str = "r8x 0.1.0 (R8 Script & Command Executor - 100% Pure Safe Rust)";
+const VERSION: &str = "r8x 12.8.0 (R8 Script & Command Executor - based on Google V8 12.8)";
 
 fn print_help() {
-    println!("r8x 0.1.0 - R8 Script & Command Executor (100% Pure Safe Rust)\n");
+    println!("r8x 12.8.0 - R8 Script & Command Executor (based on Google V8 12.8)\n");
     println!("Usage: r8x [options] <script.js | script.wasm | -e <code>> [-- [arguments]]\n");
     println!("Options:");
     println!("  -e, --eval <code>     Execute one-liner JavaScript code directly");

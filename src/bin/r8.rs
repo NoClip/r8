@@ -10,10 +10,10 @@ use r8::inspector::server::InspectorServer;
 use r8::inspector::InspectorSession;
 use r8::runtime::Context;
 
-const VERSION: &str = "r8 0.1.0 (Safe Rust V8 JavaScript & WebAssembly Engine)";
+const VERSION: &str = "r8 12.8.0 (based on Google V8 12.8)";
 
 fn print_help() {
-    println!("r8 0.1.0 - Safe Rust V8 JavaScript & WebAssembly Engine\n");
+    println!("r8 12.8.0 (based on Google V8 12.8)\n");
     println!("Usage: r8 [options] [script.js | script.wasm] [-- [arguments]]\n");
     println!("Commands & Options:");
     println!("  -e, --eval <code>     Evaluate string as JavaScript");
