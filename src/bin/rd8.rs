@@ -15,7 +15,7 @@ use r8::runtime::Context;
 const VERSION: &str = "rd8 12.8.0 (R8 Developer Shell - based on Google V8 12.8)";
 
 fn print_help() {
-    println!("rd8 12.8.0 - R8 Developer Shell (based on Google V8 12.8)\n");
+    println!("rd8 12.8.0 - R8 Developer Shell (based on Google V8 12.8, analogous to d8)\n");
     println!("Usage: rd8 [options] [script.js | script.wasm] [-- [arguments]]\n");
     println!("Developer & Inspection Options:");
     println!("  -e, --eval <code>     Evaluate string as JavaScript");

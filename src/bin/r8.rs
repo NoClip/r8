@@ -13,7 +13,7 @@ use r8::runtime::Context;
 const VERSION: &str = "r8 12.8.0 (based on Google V8 12.8)";
 
 fn print_help() {
-    println!("r8 12.8.0 (based on Google V8 12.8)\n");
+    println!("r8 12.8.0 - JavaScript & WebAssembly Engine (based on Google V8 12.8, analogous to v8)\n");
     println!("Usage: r8 [options] [script.js | script.wasm] [-- [arguments]]\n");
     println!("Commands & Options:");
     println!("  -e, --eval <code>     Evaluate string as JavaScript");

@@ -10,7 +10,7 @@ use r8::runtime::Context;
 const VERSION: &str = "r8x 12.8.0 (R8 Script & Command Executor - based on Google V8 12.8)";
 
 fn print_help() {
-    println!("r8x 12.8.0 - R8 Script & Command Executor (based on Google V8 12.8)\n");
+    println!("r8x 12.8.0 - R8 Script & Command Executor (based on Google V8 12.8, analogous to bunx / npx)\n");
     println!("Usage: r8x [options] <script.js | script.wasm | -e <code>> [-- [arguments]]\n");
     println!("Options:");
     println!("  -e, --eval <code>     Execute one-liner JavaScript code directly");

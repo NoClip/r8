@@ -16,9 +16,9 @@ R8 provides dedicated CLI binaries tailored for universal execution, developer d
 
 | Binary | Role | Description |
 |:---|:---|:---|
-| **`r8`** | **Primary Engine Shell** | Main interactive REPL, script runner, and execution engine. |
-| **`rd8`** | **Developer Shell** | Developer shell with bytecode disassembly, Sea-of-Nodes IR inspection, and Chrome DevTools CDP. |
-| **`r8x`** | **Script & Command Runner** | Fast one-off script runner and expression evaluator (analogous to `bunx`/`npx`). |
+| **`r8`** | **Primary Engine Shell** | Main interactive REPL, script runner, and execution engine (analogous to `v8`). |
+| **`rd8`** | **Developer Shell** | Developer shell with bytecode disassembly, Sea-of-Nodes IR inspection, and Chrome DevTools CDP (analogous to `d8`). |
+| **`r8x`** | **Script & Command Runner** | Fast one-off script runner and expression evaluator (analogous to `bunx` / `npx`). |
 
 ---
 
