@@ -52,7 +52,6 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/d8.exe" -Destination $staging/
           Copy-Item "target/${{ matrix.target }}/release/r8.exe" -Destination $staging/
           Copy-Item "target/${{ matrix.target }}/release/rd8.exe" -Destination $staging/
-          Copy-Item "target/${{ matrix.target }}/release/rs8.exe" -Destination $staging/
           Copy-Item "target/${{ matrix.target }}/release/r8x.exe" -Destination $staging/
           if (Test-Path "target/${{ matrix.target }}/release/r8.dll") {
             Copy-Item "target/${{ matrix.target }}/release/r8.dll" -Destination $staging/
@@ -76,7 +75,6 @@ jobs:
           cp "target/${{ matrix.target }}/release/d8" "$staging/"
           cp "target/${{ matrix.target }}/release/r8" "$staging/"
           cp "target/${{ matrix.target }}/release/rd8" "$staging/"
-          cp "target/${{ matrix.target }}/release/rs8" "$staging/"
           cp "target/${{ matrix.target }}/release/r8x" "$staging/"
           if [ -f "target/${{ matrix.target }}/release/libr8.so" ]; then
             cp "target/${{ matrix.target }}/release/libr8.so" "$staging/"
