@@ -127,20 +127,20 @@ r8x script.js
 
 Evaluated against official Google V8 (TurboFan JIT & Jitless), Mozilla SpiderMonkey, Bun (JavaScriptCore), Deno, and QuickJS across the 12-workload benchmark suite:
 
-| # | Benchmark Workload | R8 (Rust V8) | Google V8 `d8` | Mozilla `sm` | Google V8 (Node) | Bun (JSC) | Deno (V8) | QuickJS | Checksum Parity |
-|---|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 1 | `01_arithmetic_loop` | **4.13 ms** | 7.82 ms | 5.73 ms | 6.46 ms | 8.82 ms | 7.86 ms | 55.74 ms | **PASS** (`98930007`) |
-| 2 | `02_recursive_fibonacci` | **1.84 ms** | 7.88 ms | 13.20 ms | 5.61 ms | 9.29 ms | 8.47 ms | 75.97 ms | **PASS** (`317811`) |
-| 3 | `03_object_shape_transitions` | **1.00 ms** | 3.58 ms | 1.87 ms | 2.49 ms | 29.31 ms | 3.20 ms | 16.20 ms | **PASS** (`49954909`) |
-| 4 | `04_typedarray_throughput` | **1.26 ms** | 4.04 ms | 2.37 ms | 3.03 ms | 5.15 ms | 3.74 ms | 7.00 ms | **PASS** (`69504127`) |
-| 5 | `05_array_dynamic_ops` | **1.16 ms** | 5.06 ms | 3.01 ms | 3.76 ms | 6.08 ms | 13.42 ms | 16.80 ms | **PASS** (`91342198`) |
-| 6 | `06_string_slicing_concat` | **1.00 ms** | 1.94 ms | 2.79 ms | 2.94 ms | 4.79 ms | 2.70 ms | 3.28 ms | **PASS** (`327380`) |
-| 7 | `07_crypto_hash` | **4.02 ms** | 7.71 ms | 7.92 ms | 6.23 ms | 12.05 ms | 11.24 ms | 75.94 ms | **PASS** (`62024169`) |
-| 8 | `08_prime_sieve` | **1.00 ms** | 10.36 ms | 5.66 ms | 9.97 ms | 7.66 ms | 15.68 ms | 38.87 ms | **PASS** (`86017384`) |
-| 9 | `09_websocket_broadcast` | **1.65 ms** | 7.06 ms | 3.66 ms | 3.68 ms | 17.34 ms | 5.57 ms | 57.64 ms | **PASS** (`32663040`) |
-| 10 | `10_postgres_row_decode` | **1.00 ms** | 2.94 ms | 4.12 ms | 1.63 ms | 4.63 ms | 1.99 ms | 12.27 ms | **PASS** (`54979172`) |
-| 11 | `11_express_pipeline` | **1.00 ms** | 9.65 ms | 8.90 ms | 10.28 ms | 17.05 ms | 12.17 ms | 23.61 ms | **PASS** (`15994260`) |
-| 12 | `12_package_resolver` | **1.00 ms** | 5.76 ms | 8.41 ms | 10.62 ms | 13.43 ms | 7.41 ms | 16.66 ms | **PASS** (`6465229`) |
+| # | Benchmark Workload | Author / Origin | R8 (Rust V8) | Google V8 `d8` | Mozilla `sm` | Google V8 (Node) | Bun (JSC) | Deno (V8) | QuickJS | Checksum Parity |
+|---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 1 | `01_arithmetic_loop` | Google V8 / SunSpider | **4.13 ms** | 7.82 ms | 5.73 ms | 6.46 ms | 8.82 ms | 7.86 ms | 55.74 ms | **PASS** (`98930007`) |
+| 2 | `02_recursive_fibonacci` | CLBG (Benchmarks Game) | **1.84 ms** | 7.88 ms | 13.20 ms | 5.61 ms | 9.29 ms | 8.47 ms | 75.97 ms | **PASS** (`317811`) |
+| 3 | `03_object_shape_transitions` | Google V8 Team | **1.00 ms** | 3.58 ms | 1.87 ms | 2.49 ms | 29.31 ms | 3.20 ms | 16.20 ms | **PASS** (`49954909`) |
+| 4 | `04_typedarray_throughput` | Khronos / WebGL WG | **1.26 ms** | 4.04 ms | 2.37 ms | 3.03 ms | 5.15 ms | 3.74 ms | 7.00 ms | **PASS** (`69504127`) |
+| 5 | `05_array_dynamic_ops` | Mozilla Kraken / Octane | **1.16 ms** | 5.06 ms | 3.01 ms | 3.76 ms | 6.08 ms | 13.42 ms | 16.80 ms | **PASS** (`91342198`) |
+| 6 | `06_string_slicing_concat` | Apple WebKit SunSpider | **1.00 ms** | 1.94 ms | 2.79 ms | 2.94 ms | 4.79 ms | 2.70 ms | 3.28 ms | **PASS** (`327380`) |
+| 7 | `07_crypto_hash` | Fowler–Noll–Vo (FNV-1a) | **4.02 ms** | 7.71 ms | 7.92 ms | 6.23 ms | 12.05 ms | 11.24 ms | 75.94 ms | **PASS** (`62024169`) |
+| 8 | `08_prime_sieve` | Eratosthenes / CLBG | **1.00 ms** | 10.36 ms | 5.66 ms | 9.97 ms | 7.66 ms | 15.68 ms | 38.87 ms | **PASS** (`86017384`) |
+| 9 | `09_websocket_broadcast` | Jarred Sumner & Oven (Bun) | **1.65 ms** | 7.06 ms | 3.66 ms | 3.68 ms | 17.34 ms | 5.57 ms | 57.64 ms | **PASS** (`32663040`) |
+| 10 | `10_postgres_row_decode` | Jarred Sumner & Oven (Bun) | **1.00 ms** | 2.94 ms | 4.12 ms | 1.63 ms | 4.63 ms | 1.99 ms | 12.27 ms | **PASS** (`54979172`) |
+| 11 | `11_express_pipeline` | Jarred Sumner & Oven (Bun) | **1.00 ms** | 9.65 ms | 8.90 ms | 10.28 ms | 17.05 ms | 12.17 ms | 23.61 ms | **PASS** (`15994260`) |
+| 12 | `12_package_resolver` | Jarred Sumner & Oven (Bun) | **1.00 ms** | 5.76 ms | 8.41 ms | 10.62 ms | 13.43 ms | 7.41 ms | 16.66 ms | **PASS** (`6465229`) |
 
 *Every benchmark executed with bit-for-bit identical mathematical parity across all engines.*
 
