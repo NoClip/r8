@@ -49,7 +49,6 @@ jobs:
           New-Item -ItemType Directory -Path dist -Force
           $staging = "r8-staging"
           New-Item -ItemType Directory -Path $staging -Force
-          Copy-Item "target/${{ matrix.target }}/release/d8.exe" -Destination $staging/
           Copy-Item "target/${{ matrix.target }}/release/r8.exe" -Destination $staging/
           Copy-Item "target/${{ matrix.target }}/release/rd8.exe" -Destination $staging/
           Copy-Item "target/${{ matrix.target }}/release/r8x.exe" -Destination $staging/
@@ -72,7 +71,6 @@ jobs:
           mkdir -p dist
           staging="r8-staging"
           mkdir -p "$staging"
-          cp "target/${{ matrix.target }}/release/d8" "$staging/"
           cp "target/${{ matrix.target }}/release/r8" "$staging/"
           cp "target/${{ matrix.target }}/release/rd8" "$staging/"
           cp "target/${{ matrix.target }}/release/r8x" "$staging/"

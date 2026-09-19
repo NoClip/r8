@@ -17,9 +17,8 @@ R8 provides dedicated CLI binaries tailored for universal execution, developer d
 | Binary | Role | Description |
 |:---|:---|:---|
 | **`r8`** | **Primary Engine Shell** | Main interactive REPL, script runner, and execution engine. |
-| **`rd8`** | **Developer Shell** | Drop-in compatible replacement for Google V8's `d8` developer shell with bytecode disassembly, Sea-of-Nodes IR inspection, and Chrome DevTools CDP. |
+| **`rd8`** | **Developer Shell** | Developer shell with bytecode disassembly, Sea-of-Nodes IR inspection, and Chrome DevTools CDP. |
 | **`r8x`** | **Script & Command Runner** | Fast one-off script runner and expression evaluator (analogous to `bunx`/`npx`). |
-| **`d8`** | **V8 Drop-In Compatibility** | Exact alias for scripts and build tools expecting the standard `d8` command. |
 
 ---
 
@@ -38,7 +37,6 @@ Binaries are located in `target/release/`:
 * `r8` (or `r8.exe` on Windows)
 * `rd8` (or `rd8.exe` on Windows)
 * `r8x` (or `r8x.exe` on Windows)
-* `d8` (or `d8.exe` on Windows)
 
 ---
 
@@ -220,7 +218,7 @@ String accumulation loops avoid intermediate heap allocations through stack-allo
  │  └── Snapshot (mksnapshot): Binary heap serialization/deserialization for sub-millisecond cold starts   │
  │                                                                                                        │
  │  8. HOST EMBEDDING & SHELL (src/bin/rd8.rs, src/bin/r8.rs, src/c_api/, include/v8.h)                   │
- │  ├── CLI Tools: r8 (main engine), rd8 (diagnostics), r8x (runner), d8 (V8 drop-in)                     │
+ │  ├── CLI Tools: r8 (main engine), rd8 (diagnostics), r8x (runner)                                     │
  │  └── Chromium / Blink C-ABI: include/v8.h interface and cdylib/staticlib targets for drop-in embedding│
  └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
